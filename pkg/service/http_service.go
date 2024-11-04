@@ -1,12 +1,14 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -84,6 +86,12 @@ type CreateCcrRequest struct {
 	AllowTableExists bool `json:"allow_table_exists"`
 }
 
+type result struct {
+	*defaultResult
+	Jobs      []string         `json:"jobs,omitempty"`
+	JobStatus []*ccr.JobStatus `json:"status,omitempty"`
+}
+
 // Stringer
 func (r *CreateCcrRequest) String() string {
 	return fmt.Sprintf("name: %s, src: %v, dest: %v", r.Name, r.Src, r.Dest)
@@ -104,6 +112,156 @@ func (s *HttpService) versionHandler(w http.ResponseWriter, r *http.Request) {
 	// Create the result object with the current version
 	result := vesionResult{Version: version.GetVersion()}
 	writeJson(w, result)
+}
+
+func writeTable(w http.ResponseWriter, r *http.Request, data interface{}) {
+	// func get status
+	getStatus := func(jobStatus []*ccr.JobStatus, jobName string) string {
+		for _, status := range jobStatus {
+			if status != nil && status.Name == jobName {
+				return status.State
+			}
+		}
+		return "Unknown"
+	}
+
+	// func get progress state
+	getProgressState := func(jobStatus []*ccr.JobStatus, jobName string) string {
+		for _, status := range jobStatus {
+			if status != nil && status.Name == jobName {
+				return status.ProgressState
+			}
+		}
+		return "Unknown"
+	}
+
+	// check data type
+	resultData, ok := data.(*result)
+	if !ok {
+		http.Error(w, "Invalid data type", http.StatusInternalServerError)
+		return
+	}
+
+	// get sort target
+	sortBy := r.URL.Query().Get("sortBy")
+	sortOrder := r.URL.Query().Get("sortOrder")
+	if sortBy == "" {
+		sortBy = "jobName"
+	}
+	if sortOrder == "" {
+		sortOrder = "asc"
+	}
+
+	// sort data
+	jobs := resultData.Jobs
+	jobStatus := resultData.JobStatus
+	sort.Slice(jobs, func(i, j int) bool {
+		switch sortBy {
+		case "jobName":
+			{
+				if sortOrder == "asc" {
+					return jobs[i] < jobs[j]
+				} else {
+					return jobs[i] > jobs[j]
+				}
+			}
+		case "status":
+			{
+
+				statusI := getStatus(jobStatus, jobs[i])
+				statusJ := getStatus(jobStatus, jobs[j])
+				if sortOrder == "asc" {
+					return statusI < statusJ
+				} else {
+					return statusI > statusJ
+				}
+			}
+		case "progressState":
+			{
+
+				progressStateI := getProgressState(jobStatus, jobs[i])
+				progressStateJ := getProgressState(jobStatus, jobs[j])
+				if sortOrder == "asc" {
+					return progressStateI < progressStateJ
+				} else {
+					return progressStateI > progressStateJ
+				}
+			}
+		default:
+			return false
+		}
+	})
+
+	// html
+	var buf bytes.Buffer
+	buf.WriteString(`<!DOCTYPE html>
+<html>
+<head>
+    <title>All Job Status</title>
+    <style>
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        .sort-button {
+            cursor: pointer;
+            margin-left: 5px;
+        }
+    </style>
+</head>
+<body>
+    <h2>All Job Status</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>
+                    Job Name
+                    <span class="sort-button" onclick="sortTable('jobName', 'asc')">▲</span>
+                    <span class="sort-button" onclick="sortTable('jobName', 'desc')">▼</span>
+                </th>
+                <th>
+                    Status
+                    <span class="sort-button" onclick="sortTable('status', 'asc')">▲</span>
+                    <span class="sort-button" onclick="sortTable('status', 'desc')">▼</span>
+                </th>
+                <th>
+                    Progress State
+                    <span class="sort-button" onclick="sortTable('progressState', 'asc')">▲</span>
+                    <span class="sort-button" onclick="sortTable('progressState', 'desc')">▼</span>
+                </th>
+            </tr>
+        </thead>
+        <tbody>`)
+
+	for _, job := range jobs {
+		status := getStatus(jobStatus, job)
+		progressState := getProgressState(jobStatus, job)
+		buf.WriteString(fmt.Sprintf(`<tr><td>%s</td><td>%s</td><td>%s</td></tr>`, job, status, progressState))
+	}
+
+	buf.WriteString(`</tbody>
+    </table>
+    <script>
+        function sortTable(sortBy, sortOrder) {
+            const url = new URL(window.location.href);
+            url.searchParams.set('sortBy', sortBy);
+            url.searchParams.set('sortOrder', sortOrder);
+            window.location.href = url.toString();
+        }
+    </script>
+</body>
+</html>`)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(buf.Bytes())
 }
 
 // createCcr creates a new CCR job and adds it to the job manager.
@@ -512,6 +670,42 @@ func (s *HttpService) listJobsHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ListJobsStatus service
+func (s *HttpService) listJobsStatusHandler(w http.ResponseWriter, r *http.Request) {
+	log.Infof("list all jobs status")
+
+	var allJobStatus *result
+	defer func() { writeTable(w, r, allJobStatus) }()
+
+	// use GetAllData to get all jobs
+	if ans, err := s.db.GetAllData(); err != nil {
+		log.Warnf("when list jobs, get all data failed: %+v", err)
+
+		allJobStatus = &result{
+			defaultResult: newErrorResult(err.Error()),
+		}
+	} else {
+		var jobData []string = ans["jobs"]
+		allJobs := make([]string, 0)
+		alljobStatus := make([]*ccr.JobStatus, 0)
+		for _, eachJob := range jobData {
+			jobName := strings.Trim(strings.Split(eachJob, ",")[0], " ")
+			jobStatus, err := s.jobManager.GetJobStatus(jobName)
+			allJobs = append(allJobs, jobName)
+			if err != nil {
+				log.Warnf("when list all jobs, get job status failed: %+v", err)
+			}
+			alljobStatus = append(alljobStatus, jobStatus)
+		}
+
+		allJobStatus = &result{
+			defaultResult: newSuccessResult(),
+			Jobs:          allJobs,
+			JobStatus:     alljobStatus,
+		}
+	}
+}
+
 // get job progress
 func (s *HttpService) jobProgressHandler(w http.ResponseWriter, r *http.Request) {
 	log.Infof("get job progress")
@@ -688,6 +882,7 @@ func (s *HttpService) RegisterHandlers() {
 	s.mux.HandleFunc("/resume", s.resumeHandler)
 	s.mux.HandleFunc("/delete", s.deleteHandler)
 	s.mux.HandleFunc("/job_status", s.statusHandler)
+	s.mux.HandleFunc("/all_job_status", s.listJobsStatusHandler)
 	s.mux.HandleFunc("/desync", s.desyncHandler)
 	s.mux.HandleFunc("/update_job", s.updateJobHandler)
 	s.mux.HandleFunc("/list_jobs", s.listJobsHandler)
