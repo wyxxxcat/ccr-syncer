@@ -34,8 +34,8 @@ class Helper {
         return UUID.randomUUID().toString().replace("-", "")
     }
 
-    void ccrJobDelete(table = "") {
-        def bodyJson = suite.get_ccr_body "${table}"
+    void ccrJobDelete(table = "", db = "") {
+        def bodyJson = suite.get_ccr_body(table, db)
         suite.httpTest {
             uri "/delete"
             endpoint syncerAddress
@@ -44,8 +44,8 @@ class Helper {
         }
     }
 
-    void ccrJobCreate(table = "") {
-        def bodyJson = suite.get_ccr_body "${table}"
+    void ccrJobCreate(table = "", db = "") {
+        def bodyJson = suite.get_ccr_body(table, db)
         suite.httpTest {
             uri "/create_ccr"
             endpoint syncerAddress
@@ -70,8 +70,8 @@ class Helper {
         }
     }
 
-    void ccrJobPause(table = "") {
-        def bodyJson = suite.get_ccr_body "${table}"
+    void ccrJobPause(table = "", db = "") {
+        def bodyJson = suite.get_ccr_body(table, db)
         suite.httpTest {
             uri "/pause"
             endpoint syncerAddress
@@ -80,8 +80,8 @@ class Helper {
         }
     }
 
-    void ccrJobResume(table = "") {
-        def bodyJson = suite.get_ccr_body "${table}"
+    void ccrJobResume(table = "", db = "") {
+        def bodyJson = suite.get_ccr_body(table, db)
         suite.httpTest {
             uri "/resume"
             endpoint syncerAddress
@@ -90,8 +90,8 @@ class Helper {
         }
     }
 
-    void ccrJobDesync(table = "") {
-        def bodyJson = suite.get_ccr_body "${table}"
+    void ccrJobDesync(table = "", db = "") {
+        def bodyJson = suite.get_ccr_body(table, db)
         suite.httpTest {
             uri "/desync"
             endpoint syncerAddress
