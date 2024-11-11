@@ -22,25 +22,12 @@ suite("test_ts_table_modify_comment") {
     def sync_gap_time = 5000
     String response
 
-    def checkRestoreFinishTimesOf = { checkTable, times -> Boolean
-        Boolean ret = false
-        while (times > 0) {
-            def sqlInfo = target_sql "SHOW RESTORE FROM TEST_${context.dbName}"
-            for (List<Object> row : sqlInfo) {
-                if ((row[10] as String).contains(checkTable)) {
-                    ret = (row[4] as String) == "FINISHED"
-                }
-            }
-
-            if (ret) {
-                break
-            } else if (--times > 0) {
-                sleep(sync_gap_time)
-            }
-        }
-
-        return ret
+    if (!helper.is_version_supported([20108, 20017, 30004])) {
+        def version = helper.upstream_version()
+        logger.info("Skip the test case because the version is not supported. current version ${version}")
     }
+
+    def tableName = "tbl_" + helper.randomSuffix()
 
     def checkTableCommentTimesOf = { checkTable, expectedComment, times -> Boolean
         def expected = "COMMENT '${expectedComment}'"
@@ -73,16 +60,10 @@ suite("test_ts_table_modify_comment") {
         )
         """
 
-    httpTest {
-        uri "/create_ccr"
-        endpoint syncerAddress
-        def bodyJson = get_ccr_body "${tableName}"
-        body "${bodyJson}"
-        op "post"
-        result response
-    }
+    helper.ccrJobDelete(tableName)
+    helper.ccrJobCreate(tableName)
 
-    assertTrue(checkRestoreFinishTimesOf("${tableName}", 30))
+    assertTrue(helper.checkRestoreFinishTimesOf("${tableName}", 30))
 
     logger.info("=== Test 1: modify table comment case ===")
     sql """
