@@ -1974,13 +1974,19 @@ func (j *Job) handleRenameTable(binlog *festruct.TBinlog) error {
 func (j *Job) handleRenameTableRecord(renameTable *record.RenameTable) error {
 	j.srcMeta.GetTables()
 
-	// don't support rename table when table sync
-	if j.SyncType == TableSync {
-		log.Warnf("rename table is not supported when table sync, consider rebuilding this job instead")
-		return xerror.Errorf(xerror.Normal, "rename table is not supported when table sync, consider rebuilding this job instead")
+	getTableId := func(syncType SyncType) (int64, error) {
+		if syncType == TableSync {
+			return j.Dest.TableId, nil
+		} else {
+			destTableId, err := j.getDestTableIdBySrc(renameTable.TableId)
+			if err != nil {
+				return 0, err
+			}
+			return destTableId, nil
+		}
 	}
 
-	destTableId, err := j.getDestTableIdBySrc(renameTable.TableId)
+	destTableId, err := getTableId(j.SyncType)
 	if err != nil {
 		return err
 	}

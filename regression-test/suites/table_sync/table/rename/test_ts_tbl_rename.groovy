@@ -16,16 +16,26 @@
 // under the License.
 
 suite("test_ts_tbl_rename") {
-    logger.info("exit because test_rename is not supported yet")
-    return
-
     def helper = new GroovyShell(new Binding(['suite': delegate]))
             .evaluate(new File("${context.config.suitePath}/../common", "helper.groovy"))
 
     def tableName = "tbl_" + helper.randomSuffix()
+    def newTableName = "NEW_${tableName}"
+    def dbName = context.dbName
     def test_num = 0
     def insert_num = 5
 
+    def exist = { res -> Boolean
+        return res.size() != 0
+    }
+    def notExist = { res -> Boolean
+        return res.size() == 0
+    }
+
+    sql "DROP TABLE IF EXISTS ${dbName}.${tableName}"
+    sql "DROP TABLE IF EXISTS TEST_${dbName}.${tableName}"
+
+    helper.enableDbBinlog()
     sql """
         CREATE TABLE if NOT EXISTS ${tableName}
         (
@@ -44,12 +54,11 @@ suite("test_ts_tbl_rename") {
             "binlog.enable" = "true"
         )
     """
-    sql """ALTER TABLE ${tableName} set ("binlog.enable" = "true")"""
 
+    helper.ccrJobDelete(tableName)
     helper.ccrJobCreate(tableName)
 
     assertTrue(helper.checkRestoreFinishTimesOf("${tableName}", 30))
-
 
     logger.info("=== Test 0: Common insert case ===")
     for (int index = 0; index < insert_num; index++) {
@@ -61,11 +70,18 @@ suite("test_ts_tbl_rename") {
     assertTrue(helper.checkSelectTimesOf("SELECT * FROM ${tableName} WHERE test=${test_num}",
                                   insert_num, 30))
 
+    logger.info("=== Test 1: Check old table exist and new table not exist ===")
 
+    assertTrue(helper.checkShowTimesOf("SHOW TABLES LIKE '${tableName}'", exist, 30, "sql"))
 
-    logger.info("=== Test 1: Rename table case ===")
+    assertTrue(helper.checkShowTimesOf("SHOW TABLES LIKE '${newTableName}'", notExist, 30, "sql"))
+
+    assertTrue(helper.checkShowTimesOf("SHOW TABLES LIKE '${tableName}'", exist, 30, "target_sql"))
+
+    assertTrue(helper.checkShowTimesOf("SHOW TABLES LIKE '${newTableName}'", notExist, 30, "target_sql"))
+
+    logger.info("=== Test 2: Rename table case and insert data ===")
     test_num = 1
-    def newTableName = "NEW_${tableName}"
     sql "ALTER TABLE ${tableName} RENAME ${newTableName}"
 
     for (int index = 0; index < insert_num; index++) {
@@ -74,61 +90,17 @@ suite("test_ts_tbl_rename") {
             """
     }
     sql "sync"
+
+    logger.info("=== Test 3: Check new table exist and old table not exist ===")
+
+    assertTrue(helper.checkShowTimesOf("SHOW TABLES LIKE '${tableName}'", notExist, 30, "sql"))
+
+    assertTrue(helper.checkShowTimesOf("SHOW TABLES LIKE '${newTableName}'", exist, 30, "sql"))
+
+    assertTrue(helper.checkShowTimesOf("SHOW TABLES LIKE '${tableName}'", notExist, 30, "target_sql"))
+
+    assertTrue(helper.checkShowTimesOf("SHOW TABLES LIKE '${newTableName}'", exist, 30, "target_sql"))
+
     assertTrue(helper.checkSelectTimesOf("SELECT * FROM ${newTableName} WHERE test=${test_num}",
                                   insert_num, 30))
-
-
-    // logger.info("=== Test 2: Rename partition case ===")
-    // def tmpPartition = "tmp"
-    // sql """
-    //     ALTER TABLE ${newTableName}
-    //     ADD PARTITION ${tmpPartition}
-    //     VALUES [('100'), ('10000'))
-    // """
-    // assertTrue(checkShowTimesOf("""
-    //                             SHOW PARTITIONS
-    //                             FROM TEST_${context.dbName}.${tableName}
-    //                             WHERE PartitionName = \"${tmpPartition}\"
-    //                             """,
-    //                             exist, 30, "target"))
-
-    // def test_big_num = 100
-    // for (int index = 0; index < insert_num; index++) {
-    //     sql """
-    //         INSERT INTO ${newTableName} VALUES (${test_big_num}, ${index})
-    //         """
-    // }
-    // assertTrue(checkSelectTimesOf("SELECT * FROM ${tableName} WHERE test=${test_big_num}",
-    //                               insert_num, 30))
-
-    // def newPartitionName = "new_tmp"
-    // sql """ALTER TABLE ${newTableName}
-    //        RENAME PARTITION ${tmpPartition} ${newPartitionName}"""
-
-    // test_big_num = 1000
-    // for (int index = 0; index < insert_num; index++) {
-    //     sql """
-    //         INSERT INTO ${newTableName} VALUES (${test_big_num}, ${index})
-    //         """
-    // }
-    // assertTrue(checkSelectTimesOf("SELECT * FROM ${tableName} WHERE test=${test_big_num}",
-    //                               insert_num, 30))
-
-    // sql """
-    //     ALTER TABLE ${newTableName}
-    //     DROP PARTITION IF EXISTS ${newPartitionName}
-    // """
-    // def notExist = { res -> Boolean
-    //     return res.size() == 0
-    // }
-    // assertTrue(checkShowTimesOf("""
-    //                             SHOW PARTITIONS
-    //                             FROM TEST_${context.dbName}.${tableName}
-    //                             WHERE PartitionName = \"${tmpPartition}\"
-    //                             """,
-    //                             notExist, 30, "target"))
-    // def resSql = target_sql "SELECT * FROM ${tableName} WHERE test=99"
-    // assertTrue(resSql.size() == 0)
-    // resSql = target_sql "SELECT * FROM ${tableName} WHERE test=100"
-    // assertTrue(resSql.size() == 0)
 }
