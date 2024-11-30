@@ -26,7 +26,7 @@ func checkDBEnableBinlog(db string) {
 	}
 }
 
-func checkTableEnableBinlog(table string) {
+func CheckTableProperty(table string) {
 	src := &base.Spec{
 		Frontend: base.Frontend{
 			Host:       "localhost",
@@ -39,7 +39,7 @@ func checkTableEnableBinlog(table string) {
 		Table:    table,
 	}
 
-	if dbEnableBinlog, err := src.IsTableEnableBinlog(); err != nil {
+	if dbEnableBinlog, err := src.CheckTablePropertyValid(); err != nil {
 		panic(err)
 	} else {
 		log.Infof("table: ccr.%v enable binlog: %v", table, dbEnableBinlog)
@@ -52,8 +52,8 @@ func testDBEnableBinlog() {
 }
 
 func testTableEnableBinlog() {
-	checkTableEnableBinlog("src_1")
-	checkTableEnableBinlog("tbl_day")
+	CheckTableProperty("src_1")
+	CheckTableProperty("tbl_day")
 }
 
 func testGetAllTables() {

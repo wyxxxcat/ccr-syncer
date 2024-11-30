@@ -326,42 +326,56 @@ func (s *Spec) IsDatabaseEnableBinlog() (bool, error) {
 	return strings.Contains(createDBString, binlogEnableString), nil
 }
 
-func (s *Spec) IsTableEnableBinlog() (bool, error) {
-	log.Infof("check table %s.%s enable binlog", s.Database, s.Table)
+func (s *Spec) CheckTablePropertyValid() ([]string, error) {
+	log.Infof("check table %s.%s properties valid", s.Database, s.Table)
 
 	db, err := s.Connect()
+
+	checkResult := []string{}
+
+	validProperty := []string{
+		`"binlog.enable" = "true"`,
+		`"light_schema_change" = "true"`,
+	}
+
 	if err != nil {
-		return false, err
+		return checkResult, err
 	}
 
 	var createTableString string
 	query := fmt.Sprintf("SHOW CREATE TABLE %s.%s", utils.FormatKeywordName(s.Database), utils.FormatKeywordName(s.Table))
 	rows, err := db.Query(query)
 	if err != nil {
-		return false, xerror.Wrap(err, xerror.Normal, query)
+		return checkResult, xerror.Wrap(err, xerror.Normal, query)
 	}
 	defer rows.Close()
 
 	for rows.Next() {
 		rowParser := utils.NewRowParser()
 		if err := rowParser.Parse(rows); err != nil {
-			return false, xerror.Wrap(err, xerror.Normal, query)
+			return checkResult, xerror.Wrap(err, xerror.Normal, query)
 		}
 		createTableString, err = rowParser.GetString("Create Table")
 		if err != nil {
-			return false, xerror.Wrap(err, xerror.Normal, query)
+			return checkResult, xerror.Wrap(err, xerror.Normal, query)
 		}
 	}
 
 	if err := rows.Err(); err != nil {
-		return false, xerror.Wrap(err, xerror.Normal, query)
+		return checkResult, xerror.Wrap(err, xerror.Normal, query)
 	}
 
 	log.Tracef("table %s.%s create string: %s", s.Database, s.Table, createTableString)
 
-	// check "binlog.enable" = "true" in create table string
-	binlogEnableString := `"binlog.enable" = "true"`
-	return strings.Contains(createTableString, binlogEnableString), nil
+	// check valid property in create table string
+
+	for _, property := range validProperty {
+		if isValid := strings.Contains(createTableString, property); !isValid {
+			checkResult = append(checkResult, property)
+		}
+	}
+
+	return checkResult, nil
 }
 
 func (s *Spec) IsEnableRestoreSnapshotCompression() (bool, error) {
