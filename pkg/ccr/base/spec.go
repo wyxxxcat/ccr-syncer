@@ -622,7 +622,24 @@ func (s *Spec) CreateTableOrView(createTable *record.CreateTable, srcDatabase st
 
 	log.Infof("create table or view sql: %s", createSql)
 
-	list := []string {}
+	// COMMENT '[xxx, xxx]' should be COMMENT "[xxx, xxx]"
+	replaceAndEscape := func(input string) string {
+		re := regexp.MustCompile(`COMMENT '\[(.*?)\]`)
+
+		return re.ReplaceAllStringFunc(input, func(match string) string {
+			groups := re.FindStringSubmatch(match)
+			if len(groups) < 2 {
+				return match
+			}
+			content := groups[1]
+			escapedContent := strconv.Quote(content)
+			replaced := fmt.Sprintf(`COMMENT "%s"`, escapedContent[1:len(escapedContent)-1])
+			return replaced
+		})
+	}
+	createSql = replaceAndEscape(createSql)
+
+	list := []string{}
 	if strings.Contains(createSql, "agg_state<") {
 		log.Infof("agg_state is exists in the create table sql, set enable_agg_state=true")
 		list = append(list, "SET enable_agg_state=true")
@@ -1154,7 +1171,7 @@ func (s *Spec) Exec(sql string) error {
 }
 
 // Db Exec sql
-func (s *Spec) DbExec(sqls ... string) error {
+func (s *Spec) DbExec(sqls ...string) error {
 	db, err := s.ConnectDB()
 	if err != nil {
 		return err
@@ -1360,23 +1377,35 @@ func (s *Spec) RenamePartition(destTableName, oldPartition, newPartition string)
 
 func (s *Spec) LightningIndexChange(alias string, record *record.ModifyTableAddOrDropInvertedIndices) error {
 	rawSql := record.GetRawSql()
-	if len(record.AlternativeIndexes) != 1 {
-		return xerror.Errorf(xerror.Normal, "lightning index change job has more than one index, should not be here")
-	}
-
-	index := record.AlternativeIndexes[0]
-	if !index.IsInvertedIndex() {
-		return xerror.Errorf(xerror.Normal, "lightning index change job is not inverted index, should not be here")
+	if len(record.AlternativeIndexes) == 0 {
+		return xerror.Errorf(xerror.Normal, "lightning index change job is empty, should not be here")
 	}
 
 	sql := fmt.Sprintf("ALTER TABLE %s", utils.FormatKeywordName(alias))
 	if record.IsDropInvertedIndex {
-		sql = fmt.Sprintf("%s DROP INDEX %s", sql, utils.FormatKeywordName(index.GetIndexName()))
+		dropIndexes := []string{}
+		for _, index := range record.AlternativeIndexes {
+			if !index.IsInvertedIndex() {
+				return xerror.Errorf(xerror.Normal, "lightning index change job is not inverted index, should not be here")
+			}
+			indexName := utils.FormatKeywordName(index.GetIndexName())
+			dropIndexes = append(dropIndexes, fmt.Sprintf("DROP INDEX %s", indexName))
+		}
+		sql = fmt.Sprintf("%s %s", sql, strings.Join(dropIndexes, ", "))
 	} else {
-		columns := index.GetColumns()
-		columnsRef := fmt.Sprintf("(`%s`)", strings.Join(columns, "`,`"))
-		sql = fmt.Sprintf("%s ADD INDEX %s %s USING INVERTED COMMENT '%s'",
-			sql, utils.FormatKeywordName(index.GetIndexName()), columnsRef, index.GetComment())
+		addIndexes := []string{}
+		for _, index := range record.AlternativeIndexes {
+			if !index.IsInvertedIndex() {
+				return xerror.Errorf(xerror.Normal, "lightning index change job is not inverted index, should not be here")
+			}
+			columns := index.GetColumns()
+			columnsRef := fmt.Sprintf("(`%s`)", strings.Join(columns, "`,`"))
+			indexName := utils.FormatKeywordName(index.GetIndexName())
+			addIndex := fmt.Sprintf("ADD INDEX %s %s USING INVERTED COMMENT '%s'",
+				indexName, columnsRef, index.GetComment())
+			addIndexes = append(addIndexes, addIndex)
+		}
+		sql = fmt.Sprintf("%s %s", sql, strings.Join(addIndexes, ", "))
 	}
 
 	log.Infof("lighting index change sql, rawSql: %s, sql: %s", rawSql, sql)
