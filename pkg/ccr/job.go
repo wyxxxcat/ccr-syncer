@@ -1095,8 +1095,13 @@ func (j *Job) fullSync() error {
 			var commitSeq int64 = math.MaxInt64
 			switch j.SyncType {
 			case DBSync:
-				for _, seq := range tableCommitSeqMap {
+				for tableId, seq := range tableCommitSeqMap {
+					if seq == 0 {
+						// Skip the views
+						continue
+					}
 					commitSeq = utils.Min(commitSeq, seq)
+					log.Debugf("fullsync table commit seq, table id: %d, commit seq: %d", tableId, seq)
 				}
 				if snapshotResp.GetCommitSeq() > 0 {
 					commitSeq = utils.Min(commitSeq, snapshotResp.GetCommitSeq())
@@ -1327,7 +1332,7 @@ func (j *Job) getDbSyncTableRecords(upsert *record.Upsert) []*record.TableRecord
 	return tableRecords
 }
 
-func (j *Job) getReleatedTableRecords(upsert *record.Upsert) ([]*record.TableRecord, error) {
+func (j *Job) getRelatedTableRecords(upsert *record.Upsert) ([]*record.TableRecord, error) {
 	var tableRecords []*record.TableRecord //, 0, len(upsert.TableRecords))
 
 	switch j.SyncType {
@@ -1510,7 +1515,7 @@ func (j *Job) handleUpsert(binlog *festruct.TBinlog) error {
 			isTxnInsert = true
 		}
 
-		tableRecords, err := j.getReleatedTableRecords(upsert)
+		tableRecords, err := j.getRelatedTableRecords(upsert)
 		if err != nil {
 			log.Errorf("get related table records failed, err: %+v", err)
 		}
