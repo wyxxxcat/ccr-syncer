@@ -3297,26 +3297,6 @@ func (j *Job) FirstRun() error {
 	return nil
 }
 
-func (j *Job) GetLag() (int64, error) {
-	j.lock.Lock()
-	defer j.lock.Unlock()
-
-	srcSpec := &j.Src
-	rpc, err := j.factory.NewFeRpc(srcSpec)
-	if err != nil {
-		return 0, err
-	}
-
-	commitSeq := j.progress.CommitSeq
-	resp, err := rpc.GetBinlogLag(srcSpec, commitSeq)
-	if err != nil {
-		return 0, err
-	}
-
-	log.Debugf("resp: %v, lag: %d", resp, resp.GetLag())
-	return resp.GetLag(), nil
-}
-
 func (j *Job) getJobState() JobState {
 	j.lock.Lock()
 	defer j.lock.Unlock()
