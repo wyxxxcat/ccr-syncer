@@ -69,7 +69,7 @@ suite("test_ds_col_basic") {
 
     assertTrue(helper.checkRestoreFinishTimesOf("${tableName}", 30))
 
-    first_job_progress = helper.get_job_progress()
+    def first_job_progress = helper.get_job_progress()
 
     logger.info("=== Test 1: add first column case ===")
     // binlog type: ALTER_JOB, binlog data:
@@ -200,7 +200,7 @@ suite("test_ds_col_basic") {
     // no full sync triggered.
     if (helper.has_feature("feature_schema_change_partial_sync")) {
         // no full sync triggered.
-        last_job_progress = helper.get_job_progress()
+        def last_job_progress = helper.get_job_progress()
         assertTrue(last_job_progress.full_sync_start_at == first_job_progress.full_sync_start_at)
     }
 }
