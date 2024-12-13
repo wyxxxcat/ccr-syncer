@@ -1238,6 +1238,20 @@ func (s *Spec) LightningSchemaChange(srcDatabase, tableAlias string, lightningSc
 	sql = strings.Replace(sql, "REPLACE_IF_NOT_NULL NULL DEFAULT \"null\"",
 		"REPLACE_IF_NOT_NULL NULL DEFAULT NULL", 1)
 
+	// COMMENT '[xxx, xxx]' should be COMMENT "[xxx, xxx]" and escape content
+	re := regexp.MustCompile(`COMMENT '\[(.*?)\]`)
+
+	sql = re.ReplaceAllStringFunc(sql, func(match string) string {
+		groups := re.FindStringSubmatch(match)
+		if len(groups) < 2 {
+			return match
+		}
+		content := groups[1]
+		escapedContent := strconv.Quote(content)
+		replaced := fmt.Sprintf(`COMMENT "%s"`, escapedContent[1:len(escapedContent)-1])
+		return replaced
+	})
+
 	log.Infof("lighting schema change sql, rawSql: %s, sql: %s", rawSql, sql)
 	return s.DbExec(sql)
 }
