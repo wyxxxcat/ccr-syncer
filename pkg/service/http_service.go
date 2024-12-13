@@ -230,31 +230,41 @@ func (s *HttpService) getLagHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var job ccr.Job
-
 	var jobProgress ccr.JobProgress
 
 	jobInfo, err := s.db.GetJobInfo(request.Name)
-
 	if err != nil {
 		log.Warnf("db get job info failed: %+v", err)
+		lagResult = &result{
+			defaultResult: newErrorResult(err.Error()),
+		}
 		return
 	}
 
 	err = json.Unmarshal([]byte(jobInfo), &job)
 	if err != nil {
 		log.Warnf("unmarshal get job info failed: %+v", err)
+		lagResult = &result{
+			defaultResult: newErrorResult(err.Error()),
+		}
 		return
 	}
 
 	jobProgressData, err := s.db.GetProgress(request.Name)
 	if err != nil {
 		log.Warnf("db get job progress failed: %+v", err)
+		lagResult = &result{
+			defaultResult: newErrorResult(err.Error()),
+		}
 		return
 	}
 
 	err = json.Unmarshal([]byte(jobProgressData), &jobProgress)
 	if err != nil {
 		log.Warnf("unmarshal get job progress failed: %+v", err)
+		lagResult = &result{
+			defaultResult: newErrorResult(err.Error()),
+		}
 		return
 	}
 
@@ -262,6 +272,9 @@ func (s *HttpService) getLagHandler(w http.ResponseWriter, r *http.Request) {
 	rpc, err := s.jobManager.GetFactory().NewFeRpc(srcSpec)
 	if err != nil {
 		log.Warnf("new fe rpc failed: %+v", err)
+		lagResult = &result{
+			defaultResult: newErrorResult(err.Error()),
+		}
 		return
 	}
 
@@ -269,6 +282,9 @@ func (s *HttpService) getLagHandler(w http.ResponseWriter, r *http.Request) {
 	resp, err := rpc.GetBinlogLag(srcSpec, commitSeq)
 	if err != nil {
 		log.Warnf("rpc get bin log failed: %+v", err)
+		lagResult = &result{
+			defaultResult: newErrorResult(err.Error()),
+		}
 		return
 	}
 
