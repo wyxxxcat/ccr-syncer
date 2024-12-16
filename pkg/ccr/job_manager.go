@@ -171,17 +171,6 @@ func (jm *JobManager) runJob(job *Job) {
 	}()
 }
 
-func (jm *JobManager) GetLag(jobName string) (int64, error) {
-	jm.lock.RLock()
-	defer jm.lock.RUnlock()
-
-	if job, ok := jm.jobs[jobName]; ok {
-		return job.GetLag()
-	} else {
-		return 0, xerror.Errorf(xerror.Normal, "job not exist: %s", jobName)
-	}
-}
-
 func (jm *JobManager) dealJob(jobName string, dealFunc func(job *Job) error) error {
 	jm.lock.RLock()
 	defer jm.lock.RUnlock()

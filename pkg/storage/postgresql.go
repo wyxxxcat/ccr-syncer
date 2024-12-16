@@ -22,6 +22,8 @@ func NewPostgresqlDB(host string, port int, user string, password string) (DB, e
 		return nil, xerror.Wrapf(err, xerror.DB, "postgresql: open %s:%d failed", host, port)
 	}
 
+	SetDBOptions(db)
+
 	if _, err := db.Exec(fmt.Sprintf("CREATE SCHEMA IF NOT EXISTS %s", remoteDBName)); err != nil {
 		return nil, xerror.Wrapf(err, xerror.DB, "postgresql: create schema %s failed", remoteDBName)
 	}

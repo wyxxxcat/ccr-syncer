@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
-	"flag"
 	"fmt"
 	"time"
 
@@ -15,13 +14,6 @@ import (
 const (
 	defaultMaxAllowedPacket = 1024 * 1024 * 1024
 )
-
-var maxAllowedPacket int64
-
-func init() {
-	flag.Int64Var(&maxAllowedPacket, "mysql_max_allowed_packet", defaultMaxAllowedPacket,
-		"Config the max allowed packet to send to mysql server, the upper limit is 1GB")
-}
 
 type MysqlDB struct {
 	db *sql.DB
@@ -42,6 +34,8 @@ func NewMysqlDB(host string, port int, user string, password string) (DB, error)
 	if err != nil {
 		return nil, xerror.Wrapf(err, xerror.DB, "mysql: open mysql in db %s@tcp(%s:%d)/%s failed", user, host, port, remoteDBName)
 	}
+
+	SetDBOptions(db)
 
 	if _, err = db.Exec("CREATE TABLE IF NOT EXISTS jobs (`job_name` VARCHAR(512) PRIMARY KEY, `job_info` TEXT, `belong_to` VARCHAR(96))"); err != nil {
 		return nil, xerror.Wrap(err, xerror.DB, "mysql: create table jobs failed")
