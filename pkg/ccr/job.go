@@ -3312,10 +3312,10 @@ func (j *Job) FirstRun() error {
 			return xerror.Errorf(xerror.Normal, "src table %s.%s not exists", j.Src.Database, j.Src.Table)
 		}
 
-		if enable, err := j.ISrc.IsTableEnableBinlog(); err != nil {
+		if invalidProperty, err := j.ISrc.CheckTablePropertyValid(); err != nil {
 			return err
-		} else if !enable {
-			return xerror.Errorf(xerror.Normal, "src table %s.%s not enable binlog", j.Src.Database, j.Src.Table)
+		} else if len(invalidProperty) != 0 {
+			return xerror.Errorf(xerror.Normal, "src table %s.%s only support property: %s", j.Src.Database, j.Src.Table, strings.Join(invalidProperty, ", "))
 		}
 
 		if srcTableId, err := j.srcMeta.GetTableId(j.Src.Table); err != nil {
