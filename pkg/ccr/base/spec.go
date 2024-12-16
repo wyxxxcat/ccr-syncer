@@ -1226,6 +1226,9 @@ func (s *Spec) LightningSchemaChange(srcDatabase, tableAlias string, lightningSc
 	sql = strings.Replace(sql, "REPLACE_IF_NOT_NULL NULL DEFAULT \"null\"",
 		"REPLACE_IF_NOT_NULL NULL DEFAULT NULL", 1)
 
+	sql = strings.ReplaceAll(sql, "DEFAULT \"CURRENT_TIMESTAMP\"", "DEFAULT CURRENT_TIMESTAMP")
+	sql = strings.ReplaceAll(sql, "DEFAULT \"BITMAP_EMPTY_DEFAULT_VALUE\"", "DEFAULT BITMAP_EMPTY_DEFAULT_VALUE")
+
 	log.Infof("lighting schema change sql, rawSql: %s, sql: %s", rawSql, sql)
 	return s.Exec(sql)
 }
