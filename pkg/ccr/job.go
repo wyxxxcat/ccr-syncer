@@ -2374,18 +2374,34 @@ func (j *Job) handleModifyTableAddOrDropInvertedIndicesRecord(commitSeq int64, r
 		return nil
 	}
 
-	var destTableName string
+	if record.IsDropInvertedIndex {
+		var destTableName string
+		if j.SyncType == TableSync {
+			destTableName = j.Dest.Table
+		} else {
+			var err error
+			destTableName, err = j.getDestNameBySrcId(record.TableId)
+			if err != nil {
+				return xerror.Errorf(xerror.Normal, "get dest table name by src id %d failed, err: %v", record.TableId, err)
+			}
+		}
+		return j.IDest.LightningIndexChange(destTableName, record)
+	}
+
+	// Get the source table name, and trigger a partial snapshot
+	var tableName string
 	if j.SyncType == TableSync {
-		destTableName = j.Dest.Table
+		tableName = j.Src.Table
 	} else {
-		var err error
-		destTableName, err = j.getDestNameBySrcId(record.TableId)
-		if err != nil {
-			return err
+		if name, err := j.getDestNameBySrcId(record.TableId); err != nil {
+			return xerror.Errorf(xerror.Normal, "get dest table name by src id %d failed, err: %v", record.TableId, err)
+		} else {
+			tableName = name
 		}
 	}
 
-	return j.IDest.LightningIndexChange(destTableName, record)
+	replace := true
+	return j.newPartialSnapshot(record.TableId, tableName, nil, replace)
 }
 
 func (j *Job) handleIndexChangeJob(binlog *festruct.TBinlog) error {
@@ -2567,6 +2583,48 @@ func (j *Job) handleDropRollupRecord(commitSeq int64, dropRollup *record.DropRol
 	return j.IDest.DropRollup(destTableName, dropRollup.IndexName)
 }
 
+func (j *Job) handleRecoverInfo(binlog *festruct.TBinlog) error {
+	log.Infof("handle recoverInfo binlog, prevCommitSeq: %d, commitSeq: %d",
+		j.progress.PrevCommitSeq, j.progress.CommitSeq)
+
+	data := binlog.GetData()
+	recoverInfo, err := record.NewRecoverInfoFromJson(data)
+	if err != nil {
+		return err
+	}
+
+	return j.handleRecoverInfoRecord(binlog.GetCommitSeq(), recoverInfo)
+}
+
+func (j *Job) handleRecoverInfoRecord(commitSeq int64, recoverInfo *record.RecoverInfo) error {
+	if j.isBinlogCommitted(recoverInfo.TableId, commitSeq) {
+		return nil
+	}
+
+	if recoverInfo.IsRecoverTable() {
+		var tableName string
+		if recoverInfo.NewTableName != "" {
+			tableName = recoverInfo.NewTableName
+		} else {
+			tableName = recoverInfo.TableName
+		}
+		log.Infof("recover info with for table %s, will trigger partial sync", tableName)
+		return j.newPartialSnapshot(recoverInfo.TableId, tableName, nil, true)
+	}
+
+	var partitions []string
+	if recoverInfo.NewPartitionName != "" {
+		partitions = append(partitions, recoverInfo.NewPartitionName)
+	} else {
+		partitions = append(partitions, recoverInfo.PartitionName)
+	}
+	log.Infof("recover info with for partition(%s) for table %s, will trigger partial sync",
+		partitions, recoverInfo.TableName)
+	// if source does multiple recover of partition, then there is a race
+	// condition and some recover might miss due to commitseq change after snapshot.
+	return j.newPartialSnapshot(recoverInfo.TableId, recoverInfo.TableName, nil, true)
+}
+
 func (j *Job) handleBarrier(binlog *festruct.TBinlog) error {
 	data := binlog.GetData()
 	barrierLog, err := record.NewBarrierLogFromJson(data)
@@ -2645,6 +2703,12 @@ func (j *Job) handleBarrier(binlog *festruct.TBinlog) error {
 			return err
 		}
 		return j.handleModifyCommentRecord(commitSeq, modifyComment)
+	case festruct.TBinlogType_RECOVER_INFO:
+		recoverInfo, err := record.NewRecoverInfoFromJson(barrierLog.Binlog)
+		if err != nil {
+			return err
+		}
+		return j.handleRecoverInfoRecord(commitSeq, recoverInfo)
 	case festruct.TBinlogType_BARRIER:
 		log.Info("handle barrier binlog, ignore it")
 	default:
@@ -2757,6 +2821,8 @@ func (j *Job) handleBinlog(binlog *festruct.TBinlog) error {
 		return j.handleRenameRollup(binlog)
 	case festruct.TBinlogType_DROP_ROLLUP:
 		return j.handleDropRollup(binlog)
+	case festruct.TBinlogType_RECOVER_INFO:
+		return j.handleRecoverInfo(binlog)
 	default:
 		return xerror.Errorf(xerror.Normal, "unknown binlog type: %v", binlog.GetType())
 	}
@@ -3240,10 +3306,10 @@ func (j *Job) FirstRun() error {
 			return xerror.Errorf(xerror.Normal, "src table %s.%s not exists", j.Src.Database, j.Src.Table)
 		}
 
-		if enable, err := j.ISrc.IsTableEnableBinlog(); err != nil {
+		if invalidProperty, err := j.ISrc.CheckTablePropertyValid(); err != nil {
 			return err
-		} else if !enable {
-			return xerror.Errorf(xerror.Normal, "src table %s.%s not enable binlog", j.Src.Database, j.Src.Table)
+		} else if len(invalidProperty) != 0 {
+			return xerror.Errorf(xerror.Normal, "src table %s.%s only support property: %s", j.Src.Database, j.Src.Table, strings.Join(invalidProperty, ", "))
 		}
 
 		if srcTableId, err := j.srcMeta.GetTableId(j.Src.Table); err != nil {
@@ -3280,26 +3346,6 @@ func (j *Job) FirstRun() error {
 	}
 
 	return nil
-}
-
-func (j *Job) GetLag() (int64, error) {
-	j.lock.Lock()
-	defer j.lock.Unlock()
-
-	srcSpec := &j.Src
-	rpc, err := j.factory.NewFeRpc(srcSpec)
-	if err != nil {
-		return 0, err
-	}
-
-	commitSeq := j.progress.CommitSeq
-	resp, err := rpc.GetBinlogLag(srcSpec, commitSeq)
-	if err != nil {
-		return 0, err
-	}
-
-	log.Debugf("resp: %v, lag: %d", resp, resp.GetLag())
-	return resp.GetLag(), nil
 }
 
 func (j *Job) getJobState() JobState {

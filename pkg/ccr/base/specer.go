@@ -16,7 +16,6 @@ const (
 type Specer interface {
 	Valid() error
 	IsDatabaseEnableBinlog() (bool, error)
-	IsTableEnableBinlog() (bool, error)
 	IsEnableRestoreSnapshotCompression() (bool, error)
 	GetAllTables() ([]string, error)
 	GetAllViewsFromTable(tableName string) ([]string, error)
@@ -25,6 +24,7 @@ type Specer interface {
 	CreateTableOrView(createTable *record.CreateTable, srcDatabase string) error
 	CheckDatabaseExists() (bool, error)
 	CheckTableExists() (bool, error)
+	CheckTablePropertyValid() ([]string, error)
 	CheckTableExistsByName(tableName string) (bool, error)
 	GetValidBackupJob(snapshotNamePrefix string) (string, error)
 	GetValidRestoreJob(snapshotNamePrefix string) (string, error)
