@@ -632,6 +632,9 @@ func (s *Spec) CreateTableOrView(createTable *record.CreateTable, srcDatabase st
 
 	createSql = AddDBPrefixToCreateTableOrViewSql(s.Database, createSql)
 
+	// COMMENT 'xxx' should be COMMENT "xxx" and excape content
+	createSql = ReplaceAndEscapeComment(createSql)
+
 	// Compatible with doris 2.1.x, see apache/doris#44834 for details.
 	for strings.Contains(createSql, "MAXVALUEMAXVALUE") {
 		createSql = strings.Replace(createSql, "MAXVALUEMAXVALUE", "MAXVALUE, MAXVALUE", -1)
@@ -1537,4 +1540,19 @@ func AddDBPrefixToCreateTableOrViewSql(dbName, createSql string) string {
 			fmt.Sprintf("CREATE %s %s.%s ", resource, dbName, viewName))
 	}
 	return createSql
+}
+
+func ReplaceAndEscapeComment(input string) string {
+	re := regexp.MustCompile(`COMMENT '(.*?)'`)
+
+	return re.ReplaceAllStringFunc(input, func(match string) string {
+		groups := re.FindStringSubmatch(match)
+		if len(groups) < 2 {
+			return match
+		}
+		content := groups[1]
+		escapedContent := strconv.Quote(content)
+		replaced := fmt.Sprintf(`COMMENT "%s"`, escapedContent[1:len(escapedContent)-1])
+		return replaced
+	})
 }
