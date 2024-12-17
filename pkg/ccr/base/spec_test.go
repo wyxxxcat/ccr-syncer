@@ -26,3 +26,21 @@ func TestAddDBPrefixToCreateTableOrViewSql(t *testing.T) {
 		}
 	}
 }
+
+func TestReplaceAndEscapeComment(t *testing.T) {
+	type TestCase struct {
+		origin, expect string
+	}
+
+	testCases := []TestCase{
+		{"CREATE TABLE `t` (\n  `test` int NOT NULL COMMENT '[\"0000-01-01\", \"9999-12-31\"]'", "CREATE TABLE `t` (\n  `test` int NOT NULL COMMENT \"[\\\"0000-01-01\\\", \\\"9999-12-31\\\"]\""},
+		{"CREATE TABLE `t` (\n  `test` int NOT NULL COMMENT 'xxx\"test\"'", "CREATE TABLE `t` (\n  `test` int NOT NULL COMMENT \"xxx\\\"test\\\"\""},
+		{"CREATE TABLE `t` (\n  `test1` int NOT NULL COMMENT 'xxx\"test1\"', `test2` int NOT NULL COMMENT 'xxx\"test2\"'", "CREATE TABLE `t` (\n  `test1` int NOT NULL COMMENT \"xxx\\\"test1\\\"\", `test2` int NOT NULL COMMENT \"xxx\\\"test2\\\"\""},
+	}
+
+	for i, c := range testCases {
+		if actual := base.ReplaceAndEscapeComment(c.origin); actual != c.expect {
+			t.Errorf("case %d failed, expect %s, but got %s", i, c.expect, actual)
+		}
+	}
+}
