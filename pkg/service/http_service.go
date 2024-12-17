@@ -82,6 +82,7 @@ type CreateCcrRequest struct {
 	SkipError bool      `json:"skip_error"`
 	// For table sync, allow to create ccr job even if the target table already exists.
 	AllowTableExists bool `json:"allow_table_exists"`
+	ReuseBinlogLabel bool `json:"reuse_binlog_label"`
 }
 
 // Stringer
@@ -117,6 +118,7 @@ func createCcr(request *CreateCcrRequest, db storage.DB, jobManager *ccr.JobMana
 		Dest:             request.Dest,
 		SkipError:        request.SkipError,
 		AllowTableExists: request.AllowTableExists,
+		ReuseBinlogLabel: request.ReuseBinlogLabel,
 		Db:               db,
 		Factory:          jobManager.GetFactory(),
 	}

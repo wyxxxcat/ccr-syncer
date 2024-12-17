@@ -111,16 +111,17 @@ func (j JobState) String() string {
 }
 
 type Job struct {
-	SyncType  SyncType    `json:"sync_type"`
-	Name      string      `json:"name"`
-	Src       base.Spec   `json:"src"`
-	ISrc      base.Specer `json:"-"`
-	srcMeta   Metaer      `json:"-"`
-	Dest      base.Spec   `json:"dest"`
-	IDest     base.Specer `json:"-"`
-	destMeta  Metaer      `json:"-"`
-	SkipError bool        `json:"skip_error"`
-	State     JobState    `json:"state"`
+	SyncType         SyncType    `json:"sync_type"`
+	Name             string      `json:"name"`
+	Src              base.Spec   `json:"src"`
+	ISrc             base.Specer `json:"-"`
+	srcMeta          Metaer      `json:"-"`
+	Dest             base.Spec   `json:"dest"`
+	IDest            base.Specer `json:"-"`
+	destMeta         Metaer      `json:"-"`
+	SkipError        bool        `json:"skip_error"`
+	State            JobState    `json:"state"`
+	ReuseBinlogLabel bool        `json:"reuse_binlog_label"`
 
 	factory *Factory `json:"-"`
 
@@ -147,6 +148,7 @@ type JobContext struct {
 	Db               storage.DB
 	SkipError        bool
 	AllowTableExists bool
+	ReuseBinlogLabel bool
 	Factory          *Factory
 }
 
@@ -161,15 +163,16 @@ func NewJobFromService(name string, ctx context.Context) (*Job, error) {
 	src := jobContext.Src
 	dest := jobContext.Dest
 	job := &Job{
-		Name:      name,
-		Src:       src,
-		ISrc:      factory.NewSpecer(&src),
-		srcMeta:   factory.NewMeta(&jobContext.Src),
-		Dest:      dest,
-		IDest:     factory.NewSpecer(&dest),
-		destMeta:  factory.NewMeta(&jobContext.Dest),
-		SkipError: jobContext.SkipError,
-		State:     JobRunning,
+		Name:             name,
+		Src:              src,
+		ISrc:             factory.NewSpecer(&src),
+		srcMeta:          factory.NewMeta(&jobContext.Src),
+		Dest:             dest,
+		IDest:            factory.NewSpecer(&dest),
+		destMeta:         factory.NewMeta(&jobContext.Dest),
+		SkipError:        jobContext.SkipError,
+		State:            JobRunning,
+		ReuseBinlogLabel: jobContext.ReuseBinlogLabel,
 
 		allowTableExists: jobContext.AllowTableExists,
 		factory:          factory,
@@ -1444,6 +1447,7 @@ func (j *Job) handleUpsert(binlog *festruct.TBinlog) error {
 		SourceStids  []int64                     `json:"source_stid"`
 		DestStids    []int64                     `json:"desc_stid"`
 		SubTxnInfos  []*festruct.TSubTxnInfo     `json:"sub_txn_infos"`
+		Label        string                      `json:"label"`
 	}
 
 	updateInMemory := func() error {
@@ -1543,6 +1547,7 @@ func (j *Job) handleUpsert(binlog *festruct.TBinlog) error {
 			TableRecords: tableRecords,
 			IsTxnInsert:  isTxnInsert,
 			SourceStids:  upsert.Stids,
+			Label:        upsert.Label,
 		}
 		j.progress.NextSubVolatile(BeginTransaction, inMemoryData)
 
@@ -1559,7 +1564,12 @@ func (j *Job) handleUpsert(binlog *festruct.TBinlog) error {
 			return err
 		}
 
-		label := j.newLabel(commitSeq)
+		var label string
+		if j.ReuseBinlogLabel {
+			label = inMemoryData.Label
+		} else {
+			label = j.newLabel(commitSeq)
+		}
 
 		var beginTxnResp *festruct.TBeginTxnResult_
 		if isTxnInsert {
