@@ -643,7 +643,6 @@ func (s *Spec) CreateTableOrView(createTable *record.CreateTable, srcDatabase st
 	log.Infof("create table or view sql: %s", createSql)
 
 	// FIXME(walter) avoid set session variables in the reusable connection.
-
 	list := []string{}
 	if strings.Contains(createSql, "agg_state<") {
 		log.Infof("agg_state is exists in the create table sql, set enable_agg_state=true")
