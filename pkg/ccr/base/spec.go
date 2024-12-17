@@ -631,6 +631,7 @@ func (s *Spec) CreateTableOrView(createTable *record.CreateTable, srcDatabase st
 	}
 
 	createSql = AddDBPrefixToCreateTableOrViewSql(s.Database, createSql)
+	createSql = ReplaceDBNameForCreateSql(createSql, srcDatabase, s.Database)
 
 	// Compatible with doris 2.1.x, see apache/doris#44834 for details.
 	for strings.Contains(createSql, "MAXVALUEMAXVALUE") {
@@ -1548,5 +1549,11 @@ func AddDBPrefixToCreateTableOrViewSql(dbName, createSql string) string {
 		createSql = re.ReplaceAllString(createSql,
 			fmt.Sprintf("CREATE %s %s.%s ", resource, dbName, viewName))
 	}
+	return createSql
+}
+
+func ReplaceDBNameForCreateSql(createSql, srcDbName, destName string) string {
+	re := regexp.MustCompile(fmt.Sprintf(" `%s`.", srcDbName))
+	createSql = re.ReplaceAllString(createSql, fmt.Sprintf(" `%s`.", destName))
 	return createSql
 }

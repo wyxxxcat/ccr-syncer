@@ -26,3 +26,21 @@ func TestAddDBPrefixToCreateTableOrViewSql(t *testing.T) {
 		}
 	}
 }
+
+func TestReplaceDBNameForCreateSql(t *testing.T) {
+	type TestCase struct {
+		origin, expect string
+	}
+
+	testCases := []TestCase{
+		{"CREATE VIEW `target_db`.`v` AS (select `origin_db`.`func`(`internal`.`target_db`.`create_view_table1`.`id`) as `c1`,abs(`internal`.`target_db`.`create_view_table1`.`id`) from `internal`.`target_db`.`create_view_table1`)", "CREATE VIEW `target_db`.`v` AS (select `target_db`.`func`(`internal`.`target_db`.`create_view_table1`.`id`) as `c1`,abs(`internal`.`target_db`.`create_view_table1`.`id`) from `internal`.`target_db`.`create_view_table1`)"},
+		{"CREATE VIEW `target_db`.`v` AS (select `origin_db_not_replace`.`func`(`internal`.`target_db`.`create_view_table1`.`id`) as `c1`,abs(`internal`.`target_db`.`create_view_table1`.`id`) from `internal`.`target_db`.`create_view_table1`)", "CREATE VIEW `target_db`.`v` AS (select `origin_db_not_replace`.`func`(`internal`.`target_db`.`create_view_table1`.`id`) as `c1`,abs(`internal`.`target_db`.`create_view_table1`.`id`) from `internal`.`target_db`.`create_view_table1`)"},
+		{"CREATE VIEW `target_db`.`v` AS (select `origin_db`.`func`(`internal`.`target_db`.`origin_db`.`id`) as `c1`,abs(`internal`.`target_db`.`origin_db`.`id`) from `internal`.`target_db`.`origin_db`)", "CREATE VIEW `target_db`.`v` AS (select `target_db`.`func`(`internal`.`target_db`.`origin_db`.`id`) as `c1`,abs(`internal`.`target_db`.`origin_db`.`id`) from `internal`.`target_db`.`origin_db`)"},
+	}
+
+	for i, c := range testCases {
+		if actual := base.ReplaceDBNameForCreateSql(c.origin, "origin_db", "target_db"); actual != c.expect {
+			t.Errorf("case %d failed, expect %s, but got %s", i, c.expect, actual)
+		}
+	}
+}
