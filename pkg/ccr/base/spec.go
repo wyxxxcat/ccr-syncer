@@ -492,8 +492,10 @@ func (s *Spec) GetAllViewsFromTable(tableName string) ([]string, error) {
 
 	// then query view's create sql, if create sql contains tableName, this view is wanted
 	viewRegex := regexp.MustCompile("(`internal`\\.`\\w+`|`default_cluster:\\w+`)\\.`" + strings.TrimSpace(tableName) + "`")
+	dbName := utils.FormatKeywordName(s.Database)
 	for _, eachViewName := range viewsFromQuery {
-		showCreateViewSql := fmt.Sprintf("SHOW CREATE VIEW %s", eachViewName)
+		eachViewName = utils.FormatKeywordName(eachViewName)
+		showCreateViewSql := fmt.Sprintf("SHOW CREATE VIEW %s.%s", dbName, eachViewName)
 		createViewSqlList, err := s.queryResult(showCreateViewSql, "Create View", "SHOW CREATE VIEW")
 		if err != nil {
 			return nil, xerror.Wrap(err, xerror.Normal, "show create view failed")
@@ -628,6 +630,11 @@ func (s *Spec) CreateTableOrView(createTable *record.CreateTable, srcDatabase st
 		log.Debugf("original create view sql is %s, after replace, now sql is %s", createTable.Sql, createSql)
 	}
 
+	createSql = AddDBPrefixToCreateTableOrViewSql(s.Database, createSql)
+
+	// COMMENT 'xxx' should be COMMENT "xxx" and excape content
+	createSql = ReplaceAndEscapeComment(createSql)
+
 	// Compatible with doris 2.1.x, see apache/doris#44834 for details.
 	for strings.Contains(createSql, "MAXVALUEMAXVALUE") {
 		createSql = strings.Replace(createSql, "MAXVALUEMAXVALUE", "MAXVALUE, MAXVALUE", -1)
@@ -635,22 +642,7 @@ func (s *Spec) CreateTableOrView(createTable *record.CreateTable, srcDatabase st
 
 	log.Infof("create table or view sql: %s", createSql)
 
-	// COMMENT '[xxx, xxx]' should be COMMENT "[xxx, xxx]"
-	replaceAndEscape := func(input string) string {
-		re := regexp.MustCompile(`COMMENT '\[(.*?)\]`)
-
-		return re.ReplaceAllStringFunc(input, func(match string) string {
-			groups := re.FindStringSubmatch(match)
-			if len(groups) < 2 {
-				return match
-			}
-			content := groups[1]
-			escapedContent := strconv.Quote(content)
-			replaced := fmt.Sprintf(`COMMENT "%s"`, escapedContent[1:len(escapedContent)-1])
-			return replaced
-		})
-	}
-	createSql = replaceAndEscape(createSql)
+	// FIXME(walter) avoid set session variables in the reusable connection.
 
 	list := []string{}
 	if strings.Contains(createSql, "agg_state<") {
@@ -1243,12 +1235,13 @@ func (s *Spec) LightningSchemaChange(srcDatabase, tableAlias string, lightningSc
 		match = fmt.Sprintf("`%s`.", srcDatabase)
 	}
 	dbName := utils.FormatKeywordName(s.Database)
-	sql := strings.Replace(rawSql, match, dbName, 1)
+	sql := strings.Replace(rawSql, match, fmt.Sprintf("%s.", dbName), 1)
 
 	// 2. handle alias
 	if tableAlias != "" {
+		tableAlias := utils.FormatKeywordName(tableAlias)
 		re := regexp.MustCompile(fmt.Sprintf("ALTER TABLE %s.`[^`]*`", dbName))
-		sql = re.ReplaceAllString(sql, fmt.Sprintf("ALTER TABLE `%s`", tableAlias))
+		sql = re.ReplaceAllString(sql, fmt.Sprintf("ALTER TABLE %s.%s", dbName, tableAlias))
 	}
 
 	// 3. compatible REPLACE_IF_NOT_NULL NULL DEFAULT "null"
@@ -1386,7 +1379,7 @@ func (s *Spec) DropPartition(destTableName string, dropPartition *record.DropPar
 }
 
 func (s *Spec) RenamePartition(destTableName, oldPartition, newPartition string) error {
-	dbName := utils.FormatKeywordName(destTableName)
+	dbName := utils.FormatKeywordName(s.Database)
 	destTableName = utils.FormatKeywordName(destTableName)
 	oldPartition = utils.FormatKeywordName(oldPartition)
 	newPartition = utils.FormatKeywordName(newPartition)
@@ -1449,7 +1442,7 @@ func (s *Spec) BuildIndex(tableAlias string, buildIndex *record.IndexChangeJob) 
 	indexName = utils.FormatKeywordName(indexName)
 	tableAlias = utils.FormatKeywordName(tableAlias)
 	dbName := utils.FormatKeywordName(s.Database)
-	sql := fmt.Sprintf("BUILD INDEX %s.%s ON %s", dbName, indexName, tableAlias)
+	sql := fmt.Sprintf("BUILD INDEX %s ON %s.%s", indexName, dbName, tableAlias)
 	if buildIndex.PartitionName != "" {
 		sqlWithPart := fmt.Sprintf("%s PARTITION (%s)", sql, utils.FormatKeywordName(buildIndex.PartitionName))
 
@@ -1546,4 +1539,33 @@ func correctAddPartitionSql(addPartitionSql string, addPartition *record.AddPart
 		addPartitionSql = strings.ReplaceAll(addPartitionSql, "ADD PARTITION", "ADD TEMPORARY PARTITION")
 	}
 	return addPartitionSql
+}
+
+func AddDBPrefixToCreateTableOrViewSql(dbName, createSql string) string {
+	// extract table/view name from create sql, and add db prefix
+	re := regexp.MustCompile("^\\s*CREATE\\s+(VIEW|TABLE)\\s+`([^`]+)`\\s+")
+	matches := re.FindStringSubmatch(createSql)
+	if len(matches) == 3 {
+		resource := matches[1]
+		viewName := utils.FormatKeywordName(matches[2])
+		dbName := utils.FormatKeywordName(dbName)
+		createSql = re.ReplaceAllString(createSql,
+			fmt.Sprintf("CREATE %s %s.%s ", resource, dbName, viewName))
+	}
+	return createSql
+}
+
+func ReplaceAndEscapeComment(input string) string {
+	re := regexp.MustCompile(`COMMENT '(.*?)'`)
+
+	return re.ReplaceAllStringFunc(input, func(match string) string {
+		groups := re.FindStringSubmatch(match)
+		if len(groups) < 2 {
+			return match
+		}
+		content := groups[1]
+		escapedContent := strconv.Quote(content)
+		replaced := fmt.Sprintf(`COMMENT "%s"`, escapedContent[1:len(escapedContent)-1])
+		return replaced
+	})
 }
