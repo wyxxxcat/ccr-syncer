@@ -1865,6 +1865,10 @@ func (j *Job) handleCreateTable(binlog *festruct.TBinlog) error {
 	}
 
 	if err = j.IDest.CreateTableOrView(createTable, j.Src.Database); err != nil {
+		if strings.Contains(err.Error(), "Can not found function") {
+			log.Warnf("skip creating table/view because the UDF function is not supported yet: %s", err.Error())
+			return nil
+		}
 		return xerror.Wrapf(err, xerror.Normal, "create table %d", createTable.TableId)
 	}
 
