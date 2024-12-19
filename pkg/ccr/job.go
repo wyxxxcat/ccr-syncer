@@ -1855,6 +1855,12 @@ func (j *Job) handleCreateTable(binlog *festruct.TBinlog) error {
 		}
 	}
 
+	if createTable.IsCreateTableWithInvertedIndex() {
+		log.Infof("create table %s with inverted index, force partial snapshot, commit seq : %d", createTable.TableName, binlog.GetCommitSeq())
+		// we need to force replace table to ensure the index id is consistent
+		return j.newPartialSnapshot(createTable.TableId, createTable.TableName, nil, true)
+	}
+
 	// Some operations, such as DROP TABLE, will be skiped in the partial/full snapshot,
 	// in that case, the dest table might already exists, so we need to check it before creating.
 	// If the dest table already exists, we need to do a partial snapshot.

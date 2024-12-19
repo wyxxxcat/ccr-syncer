@@ -47,3 +47,8 @@ func (c *CreateTable) String() string {
 	return fmt.Sprintf("CreateTable: DbId: %d, DbName: %s, TableId: %d, TableName: %s, Sql: %s",
 		c.DbId, c.DbName, c.TableId, c.TableName, c.Sql)
 }
+
+func (c *CreateTable) IsCreateTableWithInvertedIndex() bool {
+	indexRegex := regexp.MustCompile(`INDEX (.*?) USING INVERTED`)
+	return indexRegex.MatchString(c.Sql)
+}
