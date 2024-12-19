@@ -58,86 +58,121 @@ suite("test_ds_tbl_create_index") {
         }
         throw new Exception("index ${indexName} is not exists")
     }
+    try {
+        sql """ ADMIN SET FRONTEND CONFIG ("restore_reset_index_id" = "false") """
+        target_sql """ ADMIN SET FRONTEND CONFIG ("restore_reset_index_id" = "false") """
 
-    sql "DROP TABLE IF EXISTS ${dbName}.${tableNameFull}"
-    target_sql "DROP TABLE IF EXISTS TEST_${dbName}.${tableNameFull}"
-    sql "DROP TABLE IF EXISTS ${dbName}.${tableNameIndex}"
-    target_sql "DROP TABLE IF EXISTS TEST_${dbName}.${tableNameIndex}"
+        sql "DROP TABLE IF EXISTS ${dbName}.${tableNameFull}"
+        target_sql "DROP TABLE IF EXISTS TEST_${dbName}.${tableNameFull}"
+        sql "DROP TABLE IF EXISTS ${dbName}.${tableNameIndex}"
+        target_sql "DROP TABLE IF EXISTS TEST_${dbName}.${tableNameIndex}"
 
 
-    helper.enableDbBinlog()
-    helper.ccrJobDelete()
-    helper.ccrJobCreate()
+        helper.enableDbBinlog()
+        helper.ccrJobDelete()
+        helper.ccrJobCreate()
 
-    logger.info("=== Test 1: create table full sync ===")
+        logger.info("=== Test 1: create table full sync ===")
 
-    sql """
-        CREATE TABLE if NOT EXISTS ${tableNameFull}
-        (
-            `id` INT NOT NULL,
-            `test` INT NOT NULL,
-            `value` STRING DEFAULT "",
-            INDEX `idx_value` (`value`) USING INVERTED PROPERTIES ("parser" = "english")
-        )
-        ENGINE=OLAP
-        UNIQUE KEY(`id`)
-        PARTITION BY RANGE(`id`)
-        (   
-            PARTITION p1 VALUES LESS THAN ("10"),
-            PARTITION p2 VALUES LESS THAN ("20"),
-            PARTITION p3 VALUES LESS THAN ("30")
-        )
-        DISTRIBUTED BY HASH(id) BUCKETS 1
-        PROPERTIES (
-            "replication_allocation" = "tag.location.default: 1",
-            "binlog.enable" = "true"
-        )
-    """
+        sql """
+            CREATE TABLE if NOT EXISTS ${tableNameFull}
+            (
+                `id` LARGEINT NOT NULL,
+                `test` STRING NOT NULL,
+                `value` STRING DEFAULT "",
+                INDEX `idx_value` (`value`) USING INVERTED PROPERTIES ("parser" = "english")
+            )
+            ENGINE=OLAP
+            UNIQUE KEY(`id`)
+            PARTITION BY RANGE(`id`)
+            (   
+                PARTITION p1 VALUES LESS THAN ("10"),
+                PARTITION p2 VALUES LESS THAN ("20"),
+                PARTITION p3 VALUES LESS THAN ("30")
+            )
+            DISTRIBUTED BY HASH(id) BUCKETS 1
+            PROPERTIES (
+                "replication_allocation" = "tag.location.default: 1",
+                "binlog.enable" = "true"
+            )
+        """
 
-    assertTrue(helper.checkRestoreFinishTimesOf("${tableNameFull}", 30))
+        assertTrue(helper.checkRestoreFinishTimesOf("${tableNameFull}", 30))
 
-    assertTrue(helper.checkShowTimesOf("SHOW TABLES LIKE \"${tableNameFull}\"", exist, 60, "sql"))
+        assertTrue(helper.checkShowTimesOf("SHOW TABLES LIKE \"${tableNameFull}\"", exist, 60, "sql"))
 
-    assertTrue(helper.checkShowTimesOf("SHOW TABLES LIKE \"${tableNameFull}\"", exist, 60, "target"))
+        assertTrue(helper.checkShowTimesOf("SHOW TABLES LIKE \"${tableNameFull}\"", exist, 60, "target"))
 
-    logger.info("=== Test 2: create table partial sync ===")
+        logger.info("=== Test 2: create table partial sync ===")
 
-    sql """
-        CREATE TABLE if NOT EXISTS ${tableNameIndex}
-        (
-            `id` INT NOT NULL,
-            `test` INT NOT NULL,
-            `value` STRING DEFAULT "",
-            INDEX `idx_value` (`value`) USING INVERTED PROPERTIES ("parser" = "english")
-        )
-        ENGINE=OLAP
-        UNIQUE KEY(`id`)
-        PARTITION BY RANGE(`id`)
-        (
-            PARTITION p1 VALUES LESS THAN ("10"),
-            PARTITION p2 VALUES LESS THAN ("20"),
-            PARTITION p3 VALUES LESS THAN ("30")
-        )
-        DISTRIBUTED BY HASH(id) BUCKETS 1
-        PROPERTIES (
-            "replication_allocation" = "tag.location.default: 1",
-            "binlog.enable" = "true"
-        )
-    """
+        sql """
+            CREATE TABLE if NOT EXISTS ${tableNameIndex}
+            (
+                `id` LARGEINT NOT NULL,
+                `test` STRING NOT NULL,
+                `value` STRING DEFAULT "",
+                INDEX `idx_value` (`value`) USING INVERTED PROPERTIES ("parser" = "english")
+            )
+            ENGINE=OLAP
+            UNIQUE KEY(`id`)
+            PARTITION BY RANGE(`id`)
+            (
+                PARTITION p1 VALUES LESS THAN ("10"),
+                PARTITION p2 VALUES LESS THAN ("20"),
+                PARTITION p3 VALUES LESS THAN ("30"),
+                PARTITION p4 VALUES LESS THAN ("40"),
+                PARTITION p5 VALUES LESS THAN ("50"),
+                PARTITION p6 VALUES LESS THAN ("60"),
+                PARTITION p7 VALUES LESS THAN ("70")
+            )
+            DISTRIBUTED BY HASH(id) BUCKETS 2
+            PROPERTIES (
+                "replication_allocation" = "tag.location.default: 1",
+                "binlog.enable" = "true"
+            )
+        """
 
-    assertTrue(helper.checkRestoreFinishTimesOf("${tableNameIndex}", 30))
+        List<String> values = []
+        int numRows = 6;
+        for (int j = 0; j <= numRows; ++j) {
+            values.add("(${j}1, \"${j} ${j*10} ${j*100}\", \"${j*11} ${j*12}\")")
+        }
+        sql "INSERT INTO ${tableNameIndex} VALUES ${values.join(",")}"
 
-    assertTrue(helper.checkShowTimesOf("SHOW TABLES LIKE \"${tableNameIndex}\"", exist, 60, "sql"))
+        assertTrue(helper.checkRestoreFinishTimesOf("${tableNameIndex}", 30))
 
-    assertTrue(helper.checkShowTimesOf("SHOW TABLES LIKE \"${tableNameIndex}\"", exist, 60, "target"))
+        assertTrue(helper.checkShowTimesOf("SHOW TABLES LIKE \"${tableNameIndex}\"", exist, 60, "sql"))
 
-    logger.info("=== Test 3: check inverted index id ===")
+        assertTrue(helper.checkShowTimesOf("SHOW TABLES LIKE \"${tableNameIndex}\"", exist, 60, "target"))
 
-    def originIndexId = origin_query_index_id("idx_value")
-    logger.info("the exists origin index id is ${originIndexId}")
+        assertTrue(helper.checkShowTimesOf("select * from ${tableNameIndex}", exist, 60, "sql"))
+        
+        assertTrue(helper.checkShowTimesOf("select * from ${tableNameIndex}", exist, 60, "target"))
 
-    def targetIndexId = target_query_index_id("idx_value")
-    logger.info("the exists target index id is ${targetIndexId}")
+        logger.info("=== Test 3: check inverted index id ===")
 
-    assertEquals(originIndexId, targetIndexId)
+        def originIndexId = origin_query_index_id("idx_value")
+        logger.info("the exists origin index id is ${originIndexId}")
+
+        def targetIndexId = target_query_index_id("idx_value")
+        logger.info("the exists target index id is ${targetIndexId}")
+
+        assertEquals(originIndexId, targetIndexId)
+
+        sql """ set enable_match_without_inverted_index = false """
+        res = sql """ SELECT /*+ SET_VAR(inverted_index_skip_threshold = 0, enable_common_expr_pushdown = true) */ * FROM ${tableNameIndex} WHERE value MATCH_ANY "11" """
+        logger.info(res[0][1])
+        assertTrue(res.size() > 0)
+
+        target_sql """ set enable_match_without_inverted_index = false """
+        res = target_sql """ SELECT /*+ SET_VAR(inverted_index_skip_threshold = 0, enable_common_expr_pushdown = true) */ * FROM ${tableNameIndex} WHERE value MATCH_ANY "11" """
+        logger.info(res[0][1])
+        assertTrue(res.size() > 0)
+
+    } finally {
+        target_sql """ set enable_match_without_inverted_index = true """
+        sql """ set enable_match_without_inverted_index = true """
+        target_sql """ ADMIN SET FRONTEND CONFIG ("restore_reset_index_id" = "true") """
+        sql """ ADMIN SET FRONTEND CONFIG ("restore_reset_index_id" = "true") """
+    }
 }
