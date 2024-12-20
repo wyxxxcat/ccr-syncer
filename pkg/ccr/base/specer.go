@@ -22,6 +22,7 @@ type Specer interface {
 	ClearDB() error
 	CreateDatabase() error
 	CreateTableOrView(createTable *record.CreateTable, srcDatabase string) error
+	CreateMTMV(createTable *record.CreateMTMV, srcDatabase string) error
 	CheckDatabaseExists() (bool, error)
 	CheckTableExists() (bool, error)
 	CheckTablePropertyValid() ([]string, error)

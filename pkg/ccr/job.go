@@ -1919,6 +1919,31 @@ func (j *Job) handleCreateTable(binlog *festruct.TBinlog) error {
 	return nil
 }
 
+func (j *Job) handleCreateMTMV(binlog *festruct.TBinlog) error {
+	log.Infof("handle create mtmv binlog, prevCommitSeq: %d, commitSeq: %d",
+		j.progress.PrevCommitSeq, j.progress.CommitSeq)
+
+	if j.SyncType != DBSync {
+		return xerror.Errorf(xerror.Normal, "invalid sync type: %v", j.SyncType)
+	}
+
+	data := binlog.GetData()
+	createMtmv, err := record.NewCreateMTMVFromJson(data)
+	if err != nil {
+		return err
+	}
+
+	if j.isBinlogCommitted(createMtmv.TableId, binlog.GetCommitSeq()) {
+		return nil
+	}
+
+	if err = j.IDest.CreateMTMV(createMtmv, j.Src.Database); err != nil {
+		return xerror.Wrapf(err, xerror.Normal, "create mtmv %d", createMtmv.TableId)
+	}
+
+	return nil
+}
+
 // handleDropTable
 func (j *Job) handleDropTable(binlog *festruct.TBinlog) error {
 	log.Infof("handle drop table binlog, prevCommitSeq: %d, commitSeq: %d",
@@ -2858,6 +2883,8 @@ func (j *Job) handleBinlog(binlog *festruct.TBinlog) error {
 		return j.handleDropRollup(binlog)
 	case festruct.TBinlogType_RECOVER_INFO:
 		return j.handleRecoverInfo(binlog)
+	case festruct.TBinlogType_CREATE_MTMV:
+		return j.handleCreateMTMV(binlog)
 	default:
 		return xerror.Errorf(xerror.Normal, "unknown binlog type: %v", binlog.GetType())
 	}

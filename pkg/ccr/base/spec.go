@@ -644,6 +644,15 @@ func (s *Spec) CreateTableOrView(createTable *record.CreateTable, srcDatabase st
 	return s.Exec(createSql)
 }
 
+func (s *Spec) CreateMTMV(createTable *record.CreateMTMV, srcDatabase string) error {
+	createSql := createTable.Sql
+
+	createSql = AddDBPrefixToCreateTableOrViewSql(s.Database, createSql)
+
+	log.Infof("create mtmv sql: %s", createSql)
+	return s.Exec(createSql)
+}
+
 func (s *Spec) CheckDatabaseExists() (bool, error) {
 	log.Debugf("check database exist by spec: %s", s.String())
 	db, err := s.Connect()
@@ -1532,7 +1541,7 @@ func correctAddPartitionSql(addPartitionSql string, addPartition *record.AddPart
 
 func AddDBPrefixToCreateTableOrViewSql(dbName, createSql string) string {
 	// extract table/view name from create sql, and add db prefix
-	re := regexp.MustCompile("^\\s*CREATE\\s+(VIEW|TABLE)\\s+`([^`]+)`\\s+")
+	re := regexp.MustCompile("^\\s*CREATE\\s+(VIEW|TABLE|MATERIALIZED VIEW)\\s+`([^`]+)`\\s+")
 	matches := re.FindStringSubmatch(createSql)
 	if len(matches) == 3 {
 		resource := matches[1]
