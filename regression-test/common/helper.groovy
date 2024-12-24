@@ -248,18 +248,20 @@ class Helper {
 
     // Check N times whether the num of rows of the downstream data is expected.
     Boolean checkSelectTimesOf(sqlString, rowSize, times) {
-        def tmpRes = suite.target_sql "${sqlString}"
-        while (tmpRes.size() != rowSize) {
-            sleep(sync_gap_time)
-            if (--times > 0) {
+        def tmpRes = []
+        while (--times > 0) {
+            try {
                 tmpRes = suite.target_sql "${sqlString}"
-            } else {
-                logger.info("last select result: ${tmpRes}")
-                logger.info("expected row size: ${rowSize}, actual row size: ${tmpRes.size()}")
-                break
-            }
+                if (tmpRes.size() == rowSize) {
+                    return true
+                }
+            } catch (Exception) {}
+            sleep(sync_gap_time)
         }
-        return tmpRes.size() == rowSize
+
+        logger.info("last select result: ${tmpRes}")
+        logger.info("expected row size: ${rowSize}, actual row size: ${tmpRes.size()}")
+        return false
     }
 
     Boolean checkSelectColTimesOf(sqlString, colSize, times) {
