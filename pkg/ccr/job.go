@@ -1904,6 +1904,9 @@ func (j *Job) handleCreateTable(binlog *festruct.TBinlog) error {
 		if strings.Contains(errMsg, "Can not found function") {
 			log.Warnf("skip creating table/view because the UDF function is not supported yet: %s", errMsg)
 			return nil
+		} else if strings.Contains(errMsg, "Can not find resource") {
+			log.Warnf("skip creating table/view for the resource is not supported yet: %s", errMsg)
+			return nil
 		}
 		if len(createTable.TableName) > 0 && IsSessionVariableRequired(errMsg) { // ignore doris 2.0.3
 			log.Infof("a session variable is required to create table %s, force partial snapshot, commit seq: %d, msg: %s",
