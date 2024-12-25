@@ -17,11 +17,14 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -51,6 +54,7 @@ type Syncer struct {
 	Db_password string
 	Pprof       bool
 	Ppof_port   int
+	Config_file string
 }
 
 var (
@@ -61,13 +65,14 @@ var (
 
 func init() {
 	flag.BoolVar(&printVersion, "version", false, "The program's version")
-
 	flag.StringVar(&dbPath, "db_dir", "ccr.db", "sqlite3 db file")
 	flag.StringVar(&syncer.Db_type, "db_type", "sqlite3", "meta db type")
 	flag.StringVar(&syncer.Db_host, "db_host", "127.0.0.1", "meta db host")
 	flag.IntVar(&syncer.Db_port, "db_port", 3306, "meta db port")
 	flag.StringVar(&syncer.Db_user, "db_user", "root", "meta db user")
 	flag.StringVar(&syncer.Db_password, "db_password", "", "meta db password")
+	// default value of config_file is empty
+	flag.StringVar(&syncer.Config_file, "config_file", "", "meta data configuration")
 
 	flag.StringVar(&syncer.Host, "host", "127.0.0.1", "syncer host")
 	flag.IntVar(&syncer.Port, "port", 9190, "syncer port")
@@ -76,6 +81,80 @@ func init() {
 	flag.Parse()
 
 	utils.InitLog()
+}
+
+func (syncer *Syncer) parseConfigFile() bool {
+	if syncer == nil {
+		log.Errorf("syncer is null")
+		return false
+	}
+	if syncer.Config_file == "" {
+		log.Infof("config file is empty, use default value for db_host, db_port,db_user and db_password")
+		return true
+	}
+
+	file, err := os.Open(syncer.Config_file)
+	if err != nil {
+		fmt.Errorf("can not open the config file : %v", err)
+		return false
+	}
+	defer file.Close()
+
+	// read file by line
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+
+		if len(line) == 0 || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		// split the line by '='
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) != 2 {
+			log.Errorf("invalid line %s, it must have only one '='", line)
+			continue
+		}
+
+		key := strings.TrimSpace(parts[0])
+		value := strings.TrimSpace(parts[1])
+		log.Infof("config file key is %s, value is %s", key, value)
+
+		switch key {
+		case "db_type":
+			syncer.Db_type = value
+		case "db_host":
+			syncer.Db_host = value
+		case "db_port":
+			port, err := strconv.Atoi(value)
+			if err != nil {
+				log.Errorf("strconv convert strings to int failed")
+				continue
+			}
+			syncer.Db_port = port
+		case "db_user":
+			syncer.Db_user = value
+		case "db_password":
+			syncer.Db_password = value
+		default:
+			log.Warnf("invalid config, key : %s, value : %s", key, value)
+		}
+	}
+
+	return configCheck(syncer)
+}
+
+func configCheck(syncer *Syncer) bool {
+	if syncer == nil {
+		log.Warnf("syncer is null when configCheck")
+		return false
+	}
+
+	if syncer.Db_user != "" && syncer.Db_type == "sqlite3" {
+		log.Errorf("sqlite3 is only for local for now")
+		return false
+	}
+	return true
 }
 
 func main() {
@@ -90,6 +169,10 @@ func main() {
 	// Step 1: Check db
 	if dbPath == "" {
 		log.Fatal("db_dir is empty")
+	}
+	// check config
+	if syncer.parseConfigFile() == false {
+		log.Fatal("parseConfigFile failed, so exit")
 	}
 	var db storage.DB
 	var err error
@@ -200,3 +283,4 @@ func main() {
 	// Step 11: wait for all task done
 	wg.Wait()
 }
+
