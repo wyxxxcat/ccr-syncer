@@ -2394,8 +2394,33 @@ func (j *Job) handleReplaceTableRecord(commitSeq int64, record *record.ReplaceTa
 		return j.newSnapshot(commitSeq)
 	}
 
-	if j.isBinlogCommitted(record.OriginTableId, commitSeq) {
-		return nil
+	if j.progress.SyncState == DBTablesIncrementalSync {
+		// if original table already committed, new partial snapshot with the new table
+		// if new table already committed, new partial snapshot with the original table
+		// if both table are committed, skip this binlog
+		originTableSynced := j.progress.TableCommitSeqMap[record.OriginTableId] >= commitSeq
+		newTableSynced := j.progress.TableCommitSeqMap[record.NewTableId] >= commitSeq
+		if originTableSynced && newTableSynced {
+			log.Infof("filter replace table binlog, both tables are synced, origin table %s id: %d, new table %s id: %d, commit seq: %d",
+				record.OriginTableName, record.OriginTableId, record.NewTableName, record.NewTableId, commitSeq)
+			return nil
+		} else if originTableSynced && !record.SwapTable {
+			log.Infof("filter replace table binlog, the origin table %s id %d already synced, commit seq: %d, swap = false",
+				record.OriginTableName, record.OriginTableId, commitSeq)
+			return nil
+		} else if originTableSynced && record.SwapTable {
+			log.Infof("force new partial snapshot, origin table %s id %d already synced, commit seq: %d",
+				record.OriginTableName, record.OriginTableId, commitSeq)
+			return j.newPartialSnapshot(record.NewTableId, record.OriginTableName, nil, false)
+		} else if newTableSynced && !record.SwapTable {
+			log.Infof("filter replace table binlog, the new table %s id %d already synced, commit seq: %d, swap = false",
+				record.NewTableName, record.NewTableId, commitSeq)
+			return nil
+		} else if newTableSynced && record.SwapTable {
+			log.Infof("force new partial snapshot, new table %s id %d already synced, commit seq: %d",
+				record.NewTableName, record.NewTableId, commitSeq)
+			return j.newPartialSnapshot(record.OriginTableId, record.NewTableName, nil, false)
+		}
 	}
 
 	toName := record.OriginTableName
