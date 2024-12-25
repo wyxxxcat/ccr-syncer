@@ -1556,9 +1556,7 @@ func ReplaceAndEscapeComment(input string) string {
 		if len(groups) < 2 {
 			return match
 		}
-		content := groups[1]
-		escapedContent := strconv.Quote(content)
-		replaced := fmt.Sprintf(`COMMENT "%s"`, escapedContent[1:len(escapedContent)-1])
-		return replaced
+		content := strings.ReplaceAll(groups[1], `"`, `\"`)
+		return fmt.Sprintf(`COMMENT "%s"`, content)
 	})
 }

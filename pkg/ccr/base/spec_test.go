@@ -52,6 +52,7 @@ func TestReplaceAndEscapeComment(t *testing.T) {
 		{"CREATE TABLE `t` (\n  `test` int NOT NULL COMMENT '[\"0000-01-01\", \"9999-12-31\"]'", "CREATE TABLE `t` (\n  `test` int NOT NULL COMMENT \"[\\\"0000-01-01\\\", \\\"9999-12-31\\\"]\""},
 		{"CREATE TABLE `t` (\n  `test` int NOT NULL COMMENT 'xxx\"test\"'", "CREATE TABLE `t` (\n  `test` int NOT NULL COMMENT \"xxx\\\"test\\\"\""},
 		{"CREATE TABLE `t` (\n  `test1` int NOT NULL COMMENT 'xxx\"test1\"', `test2` int NOT NULL COMMENT 'xxx\"test2\"'", "CREATE TABLE `t` (\n  `test1` int NOT NULL COMMENT \"xxx\\\"test1\\\"\", `test2` int NOT NULL COMMENT \"xxx\\\"test2\\\"\""},
+		{"CREATE TABLE `t` (\n  `test1` int NOT NULL COMMENT '涓\ue161浆杩愯緭鍗曚俊鎭'", "CREATE TABLE `t` (\n  `test1` int NOT NULL COMMENT \"涓浆杩愯緭鍗曚俊鎭\""},
 	}
 
 	for i, c := range testCases {
