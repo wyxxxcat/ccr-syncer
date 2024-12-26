@@ -2027,6 +2027,33 @@ func (j *Job) handleDummy(binlog *festruct.TBinlog) error {
 	return j.newSnapshot(dummyCommitSeq)
 }
 
+func (j *Job) handleModifyProperty(binlog *festruct.TBinlog) error {
+	log.Infof("handle modify property binlog, prevCommitSeq: %d, commitSeq: %d",
+		j.progress.PrevCommitSeq, j.progress.CommitSeq)
+
+	data := binlog.GetData()
+	modifyProperty, err := record.NewModifyTablePropertyFromJson(data)
+	if err != nil {
+		return err
+	}
+
+	if j.isBinlogCommitted(modifyProperty.TableId, binlog.GetCommitSeq()) {
+		return nil
+	}
+
+	var destTableName string
+	if j.SyncType == TableSync {
+		destTableName = j.Dest.Table
+	} else {
+		var err error
+		destTableName, err = j.getDestNameBySrcId(modifyProperty.TableId)
+		if err != nil {
+			return err
+		}
+	}
+	return j.Dest.ModifyTableProperty(destTableName, modifyProperty)
+}
+
 // handleAlterJob
 func (j *Job) handleAlterJob(binlog *festruct.TBinlog) error {
 	log.Infof("handle alter job binlog, prevCommitSeq: %d, commitSeq: %d",
@@ -2887,7 +2914,7 @@ func (j *Job) handleBinlog(binlog *festruct.TBinlog) error {
 	case festruct.TBinlogType_ALTER_DATABASE_PROPERTY:
 		log.Info("handle alter database property binlog, ignore it")
 	case festruct.TBinlogType_MODIFY_TABLE_PROPERTY:
-		log.Info("handle alter table property binlog, ignore it")
+		return j.handleModifyProperty(binlog)
 	case festruct.TBinlogType_BARRIER:
 		return j.handleBarrier(binlog)
 	case festruct.TBinlogType_TRUNCATE_TABLE:

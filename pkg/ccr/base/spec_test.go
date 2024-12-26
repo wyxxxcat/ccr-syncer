@@ -17,9 +17,11 @@
 package base_test
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/selectdb/ccr_syncer/pkg/ccr/base"
+	"github.com/selectdb/ccr_syncer/pkg/ccr/record"
 )
 
 func TestAddDBPrefixToCreateTableOrViewSql(t *testing.T) {
@@ -58,6 +60,69 @@ func TestReplaceAndEscapeComment(t *testing.T) {
 	for i, c := range testCases {
 		if actual := base.ReplaceAndEscapeComment(c.origin); actual != c.expect {
 			t.Errorf("case %d failed, expect %s, but got %s", i, c.expect, actual)
+		}
+	}
+}
+
+func TestCheckModifyTablePropertySql(t *testing.T) {
+
+	type TestCase struct {
+		origin record.ModifyTableProperty
+		expect map[string]string
+	}
+	testCases := []TestCase{
+		{
+			origin: record.ModifyTableProperty{
+				DbId:      0,
+				TableId:   0,
+				TableName: "test_table_0",
+				Properties: map[string]string{
+					"replication_num":          "3",
+					"storage_policy":           "policy_0",
+					"dynamic_partition.enable": "true",
+					"compaction_policy":        "time_series",
+				},
+				Sql: "SET (\"replication_num\"=\"3\", \"storage_policy\"=\"policy_0\", \"dynamic_partition.enable\"=\"true\", \"compaction_policy\"=\"time_series\")",
+			},
+			expect: map[string]string{
+				"compaction_policy": "time_series",
+			},
+		},
+		{
+			origin: record.ModifyTableProperty{
+				DbId:      1,
+				TableId:   1,
+				TableName: "test_table_1",
+				Properties: map[string]string{
+					"colocate_with": "group1",
+					"bucket_num":    "10",
+					"binlog.enable": "true",
+				},
+				Sql: "SET (\"colocate_with\"=\"group1\", \"bucket_num\"=\"10\", \"binlog.enable\"=\"true\")",
+			},
+			expect: map[string]string{
+				"bucket_num": "10",
+			},
+		},
+		{
+			origin: record.ModifyTableProperty{
+				DbId:      2,
+				TableId:   2,
+				TableName: "test_table_2",
+				Properties: map[string]string{
+					"colocate_with": "group2",
+					"binlog.enable": "true",
+				},
+				Sql: "SET (\"colocate_with\"=\"group1\", \"binlog.enable\"=\"true\")",
+			},
+			expect: map[string]string{},
+		},
+	}
+	for i, c := range testCases {
+		actual := base.FilterUnsupportedProperties(&c.origin)
+
+		if !reflect.DeepEqual(actual, c.expect) {
+			t.Errorf("case %d failed, expect %v, but got %v", i, c.expect, actual)
 		}
 	}
 }
