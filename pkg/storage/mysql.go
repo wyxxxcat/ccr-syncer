@@ -21,8 +21,9 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"fmt"
-	log "github.com/sirupsen/logrus"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/selectdb/ccr_syncer/pkg/xerror"
@@ -33,10 +34,11 @@ const (
 )
 
 type MysqlDB struct {
-	db *sql.DB
+	db     *sql.DB
+	dbName string
 }
 
-func NewMysqlDB(host string, port int, user string, password string) (DB, error) {
+func NewMysqlDB(host string, port int, user string, password string, remoteDBName string) (DB, error) {
 	dbForDDL, err := sql.Open("mysql", fmt.Sprintf("%s:%s@tcp(%s:%d)/?maxAllowedPacket=%d", user, password, host, port, maxAllowedPacket))
 	if err != nil {
 		return nil, xerror.Wrapf(err, xerror.DB, "mysql: open %s@tcp(%s:%s) failed", user, host, password)
@@ -66,7 +68,7 @@ func NewMysqlDB(host string, port int, user string, password string) (DB, error)
 		return nil, xerror.Wrap(err, xerror.DB, "mysql: create table syncers failed")
 	}
 
-	return &MysqlDB{db: db}, nil
+	return &MysqlDB{db: db, dbName: remoteDBName}, nil
 }
 
 func (s *MysqlDB) AddJob(jobName string, jobInfo string, hostInfo string) error {
