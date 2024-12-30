@@ -271,3 +271,15 @@ func (jm *JobManager) UpdateHostMapping(jobName string, srcHostMapping, destHost
 		return xerror.Errorf(xerror.Normal, "job not exist: %s", jobName)
 	}
 }
+
+func (jm *JobManager) HandleBinlog(jobName string, commitSeq int64, mode int) error {
+	jm.lock.RLock()
+	defer jm.lock.RUnlock()
+
+	job, ok := jm.jobs[jobName]
+	if !ok {
+		return xerror.Errorf(xerror.Normal, "job %s not found", jobName)
+	}
+	log.Infof("handle binlog, job: %s, commitSeq: %d, mode: %d, job progress: %+v", jobName, commitSeq, mode, job.progress)
+	return job.HandleBinlog(commitSeq, mode)
+}

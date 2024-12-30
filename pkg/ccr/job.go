@@ -3653,3 +3653,62 @@ func IsSessionVariableRequired(msg string) bool {
 	re := regexp.MustCompile(`set enable_.+=.+|Incorrect column name .* Column regex is`)
 	return re.MatchString(msg)
 }
+
+func (j *Job) HandleBinlog(commitSeq int64, mode int) error {
+	j.lock.Lock()
+	defer j.lock.Unlock()
+
+	switch mode {
+	case 0: // skip
+		log.Infof("skip binlog, job: %s, commitSeq: %d", j.Name, commitSeq)
+		err := j.SkipBinlog(commitSeq)
+		if err != nil {
+			log.Errorf("skip binlog failed, job: %s, err: %s", j.Name, err.Error())
+			return err
+		}
+		return nil
+	case 1: // partial sync
+		log.Infof("partial sync, job: %s, commitSeq: %d, table id: %d, table: %s, db: %s", j.Name, commitSeq, j.Src.TableId, j.Src.Table, j.Src.Database)
+		err := j.newPartialSnapshot(j.Src.TableId, j.Src.Table, []string{}, false)
+		if err != nil {
+			log.Errorf("new partial snapshot failed, job: %s, err: %s", j.Name, err.Error())
+			return err
+		}
+		err = j.partialSync()
+		if err != nil {
+			log.Errorf("partial sync failed, job: %s, err: %s", j.Name, err.Error())
+			return err
+		}
+		return nil
+	case 2: // full sync
+		log.Infof("full sync, job: %s, commitSeq: %d", j.Name, commitSeq)
+		err := j.fullSync()
+		if err != nil {
+			log.Errorf("full sync failed, job: %s, err: %s", j.Name, err.Error())
+			return err
+		}
+		return nil
+	default:
+		return xerror.Errorf(xerror.Normal, "unknown handle binlog mode: %d", mode)
+	}
+}
+
+func (j *Job) SkipBinlog(commitSeq int64) error {
+	j.lock.Lock()
+	defer j.lock.Unlock()
+
+	j.progress.StartHandle(commitSeq)
+
+	if j.SyncType == DBSync && j.progress.TableCommitSeqMap != nil {
+		for tableId := range j.progress.TableCommitSeqMap {
+			if j.progress.TableCommitSeqMap[tableId] < commitSeq {
+				j.progress.TableCommitSeqMap[tableId] = commitSeq
+			}
+		}
+	}
+
+	j.progress.Done()
+
+	log.Infof("Skip binlog with commitSeq: %d", commitSeq)
+	return nil
+}

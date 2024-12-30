@@ -809,6 +809,91 @@ func (s *HttpService) updateHostMappingHandler(w http.ResponseWriter, r *http.Re
 	}
 }
 
+type handleBinlogRequest struct {
+	Name      string `json:"name,required"`
+	CommitSeq string `json:"commit_seq,required"`
+	Mode      string `json:"mode,required"` // 0: skip, 1: partial sync, 2: full sync
+}
+
+func (s *HttpService) handleBinlogHandler(w http.ResponseWriter, r *http.Request) {
+	log.Infof("handle binlog")
+
+	var result *defaultResult
+	defer func() { writeJson(w, result) }()
+
+	// // Parse the JSON request body
+	var request handleBinlogRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		log.Warnf("handle binlog failed: %+v", err)
+		result = newErrorResult(err.Error())
+		return
+	}
+
+	if request.Name == "" {
+		log.Warnf("handle binlog failed: name is empty")
+		result = newErrorResult("name is empty")
+		return
+	}
+
+	if request.CommitSeq == "" {
+		log.Warnf("handle binlog failed: commit_seq is empty")
+		result = newErrorResult("commit_seq is empty")
+		return
+	}
+
+	if request.Mode == "" {
+		log.Warnf("handle binlog failed: mode is empty")
+		result = newErrorResult("mode is empty")
+		return
+	}
+
+	mode, err := strconv.Atoi(request.Mode)
+	if err != nil {
+		log.Warnf("handle binlog failed: mode is not a number: %s", request.Mode)
+		result = newErrorResult(err.Error())
+		return
+	}
+
+	if mode < 0 || mode > 2 {
+		log.Warnf("handle binlog failed: mode is invalid")
+		result = newErrorResult("mode is invalid")
+		return
+	}
+
+	if s.redirect(request.Name, w, r) {
+		return
+	}
+
+	var jobProgress *ccr.JobProgress
+	if jobProgressStr, err := s.db.GetProgress(request.Name); err != nil {
+		log.Warnf("get job progress failed: %+v", err)
+		result = newErrorResult(err.Error())
+	} else if err = json.Unmarshal([]byte(jobProgressStr), &jobProgress); err != nil {
+		log.Warnf("unmarshal job progress failed: %+v", err)
+		result = newErrorResult(err.Error())
+	}
+
+	commitSeq, err := strconv.ParseInt(request.CommitSeq, 10, 64)
+	if err != nil {
+		log.Warnf("handle binlog failed: commit seq is not a number: %s", request.CommitSeq)
+		result = newErrorResult(err.Error())
+		return
+	}
+
+	if commitSeq != jobProgress.CommitSeq && commitSeq != jobProgress.PrevCommitSeq {
+		log.Warnf("handle binlog failed: commit seq not match: %s", request.CommitSeq)
+		result = newErrorResult("commit seq not match")
+		return
+	}
+
+	if err := s.jobManager.HandleBinlog(request.Name, commitSeq, mode); err != nil {
+		log.Warnf("handle binlog failed: %+v", err)
+		result = newErrorResult(err.Error())
+	} else {
+		result = newSuccessResult()
+	}
+}
+
 func (s *HttpService) RegisterHandlers() {
 	s.mux.HandleFunc("/version", s.versionHandler)
 	s.mux.HandleFunc("/create_ccr", s.createHandler)
@@ -825,6 +910,7 @@ func (s *HttpService) RegisterHandlers() {
 	s.mux.HandleFunc("/force_fullsync", s.forceFullsyncHandler)
 	s.mux.HandleFunc("/features", s.featuresHandler)
 	s.mux.HandleFunc("/update_host_mapping", s.updateHostMappingHandler)
+	s.mux.HandleFunc("/handle_binlog", s.handleBinlogHandler)
 	s.mux.Handle("/metrics", promhttp.Handler())
 }
 
