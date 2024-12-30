@@ -52,6 +52,7 @@ type Syncer struct {
 	Db_port     int
 	Db_user     string
 	Db_password string
+	Db_name     string
 	Pprof       bool
 	Ppof_port   int
 	Config_file string
@@ -71,6 +72,7 @@ func init() {
 	flag.IntVar(&syncer.Db_port, "db_port", 3306, "meta db port")
 	flag.StringVar(&syncer.Db_user, "db_user", "root", "meta db user")
 	flag.StringVar(&syncer.Db_password, "db_password", "", "meta db password")
+	flag.StringVar(&syncer.Db_name, "db_name", "ccr", "meta db name")
 	// default value of config_file is empty
 	flag.StringVar(&syncer.Config_file, "config_file", "", "meta data configuration")
 
@@ -89,7 +91,7 @@ func (syncer *Syncer) parseConfigFile() bool {
 		return false
 	}
 	if syncer.Config_file == "" {
-		log.Infof("config file is empty, use default value for db_host, db_port,db_user and db_password")
+		log.Infof("config file is empty, use default value for db_host, db_port, db_user, db_password and db_name")
 		return true
 	}
 
@@ -136,6 +138,8 @@ func (syncer *Syncer) parseConfigFile() bool {
 			syncer.Db_user = value
 		case "db_password":
 			syncer.Db_password = value
+		case "db_name":
+			syncer.Db_name = value
 		default:
 			log.Warnf("invalid config, key : %s, value : %s", key, value)
 		}
@@ -180,9 +184,9 @@ func main() {
 	case "sqlite3":
 		db, err = storage.NewSQLiteDB(dbPath)
 	case "mysql":
-		db, err = storage.NewMysqlDB(syncer.Db_host, syncer.Db_port, syncer.Db_user, syncer.Db_password)
+		db, err = storage.NewMysqlDB(syncer.Db_host, syncer.Db_port, syncer.Db_user, syncer.Db_password, syncer.Db_name)
 	case "postgresql":
-		db, err = storage.NewPostgresqlDB(syncer.Db_host, syncer.Db_port, syncer.Db_user, syncer.Db_password)
+		db, err = storage.NewPostgresqlDB(syncer.Db_host, syncer.Db_port, syncer.Db_user, syncer.Db_password, syncer.Db_name)
 	default:
 		err = xerror.Wrap(err, xerror.Normal, "new meta db failed.")
 	}

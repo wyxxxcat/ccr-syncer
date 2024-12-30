@@ -28,10 +28,9 @@ var (
 )
 
 const (
-	InvalidCheckTimestamp int64  = -1
-	remoteDBName          string = "ccr"
-	defaultMaxOpenConns   int    = 20
-	defaultMaxIdleConns   int    = 5
+	InvalidCheckTimestamp int64 = -1
+	defaultMaxOpenConns   int   = 20
+	defaultMaxIdleConns   int   = 5
 )
 
 var maxOpenConns int
