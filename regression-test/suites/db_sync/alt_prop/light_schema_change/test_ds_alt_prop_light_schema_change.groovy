@@ -85,6 +85,6 @@ suite("test_ds_alt_prop_light_schema_change") {
 
     assertTrue(helper.checkShowTimesOf("SHOW CREATE TABLE ${tableName}", lightSchemaChange, 60, "sql"))
 
-    // todo
+    // don't sync
     assertTrue(helper.checkShowTimesOf("SHOW CREATE TABLE ${tableName}", notLightSchemaChange, 60, "target"))
 }
