@@ -108,6 +108,9 @@ suite("test_ds_alt_prop_dy_pary") {
     logger.info("=== Test 2: alter table set property dynamic partition ===")
 
     sql """
+        ALTER TABLE ${tableName} SET ("dynamic_partition.enable" = "true")
+        """
+    sql """
         ALTER TABLE ${tableName} SET ("dynamic_partition.time_unit" = "WEEK")
         """
     sql """
@@ -136,6 +139,11 @@ suite("test_ds_alt_prop_dy_pary") {
 
     assertTrue(helper.checkShowTimesOf("SHOW CREATE TABLE ${tableName}", existNewPartitionProperty, 60, "sql"))
 
-    // don't sync
-    assertTrue(helper.checkShowTimesOf("SHOW CREATE TABLE ${tableName}", existOldPartitionProperty, 60, "target"))
+    assertTrue(helper.checkShowTimesOf("SHOW CREATE TABLE ${tableName}", existNewPartitionProperty, 60, "target"))
+
+    def res = target_sql "SHOW CREATE TABLE ${tableName}"
+    assertTrue(res.contains("\"dynamic_partition.enable\" = \"false\""))
+
+    res = sql "SHOW CREATE TABLE ${tableName}"
+    assertTrue(res.contains("\"dynamic_partition.enable\" = \"true\""))
 }

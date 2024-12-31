@@ -1495,6 +1495,28 @@ func (s *Spec) DesyncTables(tables ...string) error {
 	return nil
 }
 
+func (s *Spec) ModifyTableProperty(destTableName string, modifyProperty *record.ModifyTableProperty) error {
+	dbName := utils.FormatKeywordName(s.Database)
+	destTableName = utils.FormatKeywordName(destTableName)
+	modifyProperty.Sql = strings.ReplaceAll(modifyProperty.Sql, "\u003d", "=")
+
+	supportedProperties := FilterUnsupportedProperties(modifyProperty)
+	if len(supportedProperties) == 0 {
+		log.Warnf("the whole table properties are invalid, skip modify table property")
+		return nil
+	}
+
+	kvs := make([]string, 0, len(supportedProperties))
+	for k, v := range supportedProperties {
+		kvs = append(kvs, fmt.Sprintf("\"%s\"=\"%s\"", k, v))
+	}
+
+	sql := fmt.Sprintf("ALTER TABLE %s.%s SET (%s)", dbName, destTableName, strings.Join(kvs, ", "))
+	log.Infof("modify table property sql: %s", sql)
+
+	return s.Exec(sql)
+}
+
 // Determine whether the error are network related, eg connection refused, connection reset, exposed from net packages.
 func isNetworkRelated(err error) bool {
 	msg := err.Error()
@@ -1559,4 +1581,24 @@ func ReplaceAndEscapeComment(input string) string {
 		content := strings.ReplaceAll(groups[1], `"`, `\"`)
 		return fmt.Sprintf(`COMMENT "%s"`, content)
 	})
+}
+
+func FilterUnsupportedProperties(modifyProperty *record.ModifyTableProperty) map[string]string {
+	invalidProps := map[string]struct{}{
+		"binlog.enable":            {},
+		"light_schema_change":      {},
+		"dynamic_partition.enable": {},
+		"colocate_with":            {},
+		"storage_policy":           {},
+		"replication_num":          {},
+		"replication_allocation":   {},
+		"is_being_synced":          {},
+	}
+	validProperties := make(map[string]string)
+	for prop, value := range modifyProperty.Properties {
+		if _, exists := invalidProps[prop]; !exists {
+			validProperties[prop] = value
+		}
+	}
+	return validProperties
 }

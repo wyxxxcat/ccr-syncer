@@ -121,6 +121,5 @@ suite("test_ds_alt_prop_compaction") {
 
     assertTrue(helper.checkShowTimesOf("SHOW CREATE TABLE ${tableName}", existNewCompaction, 60, "sql"))
 
-    // don't sync
-    assertTrue(helper.checkShowTimesOf("SHOW CREATE TABLE ${tableName}", existOldCompaction, 60, "target"))
+    assertTrue(helper.checkShowTimesOf("SHOW CREATE TABLE ${tableName}", existNewCompaction, 60, "target"))
 }
