@@ -1,3 +1,19 @@
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//	http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License
 package base
 
 import (
@@ -632,21 +648,16 @@ func (s *Spec) CreateTableOrView(createTable *record.CreateTable, srcDatabase st
 
 	createSql = AddDBPrefixToCreateTableOrViewSql(s.Database, createSql)
 
+	// COMMENT 'xxx' should be COMMENT "xxx" and excape content
+	createSql = ReplaceAndEscapeComment(createSql)
+
 	// Compatible with doris 2.1.x, see apache/doris#44834 for details.
 	for strings.Contains(createSql, "MAXVALUEMAXVALUE") {
 		createSql = strings.Replace(createSql, "MAXVALUEMAXVALUE", "MAXVALUE, MAXVALUE", -1)
 	}
 
 	log.Infof("create table or view sql: %s", createSql)
-
-	// FIXME(walter) avoid set session variables in the reusable connection.
-	list := []string{}
-	if strings.Contains(createSql, "agg_state<") {
-		log.Infof("agg_state is exists in the create table sql, set enable_agg_state=true")
-		list = append(list, "SET enable_agg_state=true")
-	}
-	list = append(list, createSql)
-	return s.Exec(list...)
+	return s.Exec(createSql)
 }
 
 func (s *Spec) CheckDatabaseExists() (bool, error) {
@@ -1158,17 +1169,15 @@ func (s *Spec) WaitTransactionDone(txnId int64) {
 }
 
 // Exec sql
-func (s *Spec) Exec(sqls ...string) error {
+func (s *Spec) Exec(sql string) error {
 	db, err := s.Connect()
 	if err != nil {
 		return err
 	}
 
-	for _, sql := range sqls {
-		_, err = db.Exec(sql)
-		if err != nil {
-			return xerror.Wrapf(err, xerror.Normal, "exec sql %s failed", sql)
-		}
+	_, err = db.Exec(sql)
+	if err != nil {
+		return xerror.Wrapf(err, xerror.Normal, "exec sql %s failed", sql)
 	}
 	return nil
 }
@@ -1245,8 +1254,7 @@ func (s *Spec) LightningSchemaChange(srcDatabase, tableAlias string, lightningSc
 	sql = strings.Replace(sql, "REPLACE_IF_NOT_NULL NULL DEFAULT \"null\"",
 		"REPLACE_IF_NOT_NULL NULL DEFAULT NULL", 1)
 
-	sql = strings.ReplaceAll(sql, "DEFAULT \"CURRENT_TIMESTAMP\"", "DEFAULT CURRENT_TIMESTAMP")
-	sql = strings.ReplaceAll(sql, "DEFAULT \"BITMAP_EMPTY_DEFAULT_VALUE\"", "DEFAULT BITMAP_EMPTY_DEFAULT_VALUE")
+	sql = HandleSchemaChangeDefaultValue(sql, lightningSchemaChange)
 
 	log.Infof("lighting schema change sql, rawSql: %s, sql: %s", rawSql, sql)
 	return s.Exec(sql)
@@ -1498,6 +1506,28 @@ func (s *Spec) DesyncTables(tables ...string) error {
 	return nil
 }
 
+func (s *Spec) ModifyTableProperty(destTableName string, modifyProperty *record.ModifyTableProperty) error {
+	dbName := utils.FormatKeywordName(s.Database)
+	destTableName = utils.FormatKeywordName(destTableName)
+	modifyProperty.Sql = strings.ReplaceAll(modifyProperty.Sql, "\u003d", "=")
+
+	supportedProperties := FilterUnsupportedProperties(modifyProperty)
+	if len(supportedProperties) == 0 {
+		log.Warnf("the whole table properties are invalid, skip modify table property")
+		return nil
+	}
+
+	kvs := make([]string, 0, len(supportedProperties))
+	for k, v := range supportedProperties {
+		kvs = append(kvs, fmt.Sprintf("\"%s\"=\"%s\"", k, v))
+	}
+
+	sql := fmt.Sprintf("ALTER TABLE %s.%s SET (%s)", dbName, destTableName, strings.Join(kvs, ", "))
+	log.Infof("modify table property sql: %s", sql)
+
+	return s.Exec(sql)
+}
+
 // Determine whether the error are network related, eg connection refused, connection reset, exposed from net packages.
 func isNetworkRelated(err error) bool {
 	msg := err.Error()
@@ -1549,4 +1579,52 @@ func AddDBPrefixToCreateTableOrViewSql(dbName, createSql string) string {
 			fmt.Sprintf("CREATE %s %s.%s ", resource, dbName, viewName))
 	}
 	return createSql
+}
+
+func ReplaceAndEscapeComment(input string) string {
+	re := regexp.MustCompile(`COMMENT '(.*?)'`)
+
+	return re.ReplaceAllStringFunc(input, func(match string) string {
+		groups := re.FindStringSubmatch(match)
+		if len(groups) < 2 {
+			return match
+		}
+		content := strings.ReplaceAll(groups[1], `"`, `\"`)
+		return fmt.Sprintf(`COMMENT "%s"`, content)
+	})
+}
+
+func FilterUnsupportedProperties(modifyProperty *record.ModifyTableProperty) map[string]string {
+	invalidProps := map[string]struct{}{
+		"binlog.enable":            {},
+		"light_schema_change":      {},
+		"dynamic_partition.enable": {},
+		"colocate_with":            {},
+		"storage_policy":           {},
+		"replication_num":          {},
+		"replication_allocation":   {},
+		"is_being_synced":          {},
+	}
+	validProperties := make(map[string]string)
+	for prop, value := range modifyProperty.Properties {
+		if _, exists := invalidProps[prop]; !exists {
+			validProperties[prop] = value
+		}
+	}
+	return validProperties
+}
+
+func HandleSchemaChangeDefaultValue(sql string, lightningSchemaChange *record.ModifyTableAddOrDropColumns) string {
+	indexSchemaMap := lightningSchemaChange.IndexSchemaMap[lightningSchemaChange.TableId]
+
+	for _, columnSchema := range indexSchemaMap {
+		if columnSchema.Type.Type != "VARCHAR" && columnSchema.DefaultValue != "" {
+			if columnSchema.DefaultValue == "CURRENT_TIMESTAMP" {
+				sql = strings.ReplaceAll(sql, "DEFAULT \"CURRENT_TIMESTAMP\"", "DEFAULT CURRENT_TIMESTAMP")
+			} else if columnSchema.DefaultValue == "BITMAP_EMPTY_DEFAULT_VALUE" {
+				sql = strings.ReplaceAll(sql, "DEFAULT \"BITMAP_EMPTY_DEFAULT_VALUE\"", "DEFAULT BITMAP_EMPTY_DEFAULT_VALUE")
+			}
+		}
+	}
+	return sql
 }

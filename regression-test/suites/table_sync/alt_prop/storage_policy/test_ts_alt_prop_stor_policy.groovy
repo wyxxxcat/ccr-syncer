@@ -36,7 +36,7 @@ suite("test_ts_alt_prop_stor_policy") {
         return !res[0][1].contains("\"storage_policy\" = \"test_policy\"")
     }
 
-    def resource_name = "test_ts_tbl_storage_policy_resource"
+    def resource_name = "test_ts_tbl_storage_policy_resource" + helper.randomSuffix()
     def policy_name= "test_policy"
 
     def check_storage_policy_exist = { name->

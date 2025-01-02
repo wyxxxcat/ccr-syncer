@@ -1,3 +1,19 @@
+// Licensed to the Apache Software Foundation (ASF) under one
+// or more contributor license agreements.  See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership.  The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License.  You may obtain a copy of the License at
+//
+//	http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing,
+// software distributed under the License is distributed on an
+// "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+// KIND, either express or implied.  See the License for the
+// specific language governing permissions and limitations
+// under the License
 package service
 
 import (
@@ -14,6 +30,7 @@ import (
 	"github.com/selectdb/ccr_syncer/pkg/ccr"
 	"github.com/selectdb/ccr_syncer/pkg/ccr/base"
 	"github.com/selectdb/ccr_syncer/pkg/storage"
+	"github.com/selectdb/ccr_syncer/pkg/utils"
 	"github.com/selectdb/ccr_syncer/pkg/version"
 	"github.com/selectdb/ccr_syncer/pkg/xerror"
 
@@ -82,6 +99,7 @@ type CreateCcrRequest struct {
 	SkipError bool      `json:"skip_error"`
 	// For table sync, allow to create ccr job even if the target table already exists.
 	AllowTableExists bool `json:"allow_table_exists"`
+	ReuseBinlogLabel bool `json:"reuse_binlog_label"`
 }
 
 // Stringer
@@ -117,6 +135,7 @@ func createCcr(request *CreateCcrRequest, db storage.DB, jobManager *ccr.JobMana
 		Dest:             request.Dest,
 		SkipError:        request.SkipError,
 		AllowTableExists: request.AllowTableExists,
+		ReuseBinlogLabel: request.ReuseBinlogLabel,
 		Db:               db,
 		Factory:          jobManager.GetFactory(),
 	}
@@ -494,47 +513,6 @@ func (s *HttpService) desyncHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-type UpdateJobRequest struct {
-	Name      string `json:"name,required"`
-	SkipError bool   `json:"skip_error"`
-}
-
-func (s *HttpService) updateJobHandler(w http.ResponseWriter, r *http.Request) {
-	log.Infof("update job")
-
-	var updateJobResult *defaultResult
-	defer func() { writeJson(w, updateJobResult) }()
-
-	// Parse the JSON request body
-	var request UpdateJobRequest
-	err := json.NewDecoder(r.Body).Decode(&request)
-	if err != nil {
-		log.Warnf("update job failed: %+v", err)
-
-		updateJobResult = newErrorResult(err.Error())
-		return
-	}
-
-	if request.Name == "" {
-		log.Warnf("update job failed: name is empty")
-
-		updateJobResult = newErrorResult("name is empty")
-		return
-	}
-
-	if s.redirect(request.Name, w, r) {
-		return
-	}
-
-	if err := s.jobManager.UpdateJobSkipError(request.Name, request.SkipError); err != nil {
-		log.Warnf("desync job failed: %+v", err)
-
-		updateJobResult = newErrorResult(err.Error())
-	} else {
-		updateJobResult = newSuccessResult()
-	}
-}
-
 // ListJobs service
 func (s *HttpService) listJobsHandler(w http.ResponseWriter, r *http.Request) {
 	log.Infof("list jobs")
@@ -711,7 +689,7 @@ func (s *HttpService) forceFullsyncHandler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if err := s.jobManager.ForceFullsync(request.Name); err != nil {
+	if err := s.jobManager.SkipBinlog(request.Name, 0, ccr.SkipByFullSync); err != nil {
 		log.Warnf("force fullsync failed: %+v", err)
 		result = newErrorResult(err.Error())
 	} else {
@@ -791,22 +769,115 @@ func (s *HttpService) updateHostMappingHandler(w http.ResponseWriter, r *http.Re
 	}
 }
 
+func (s *HttpService) skipBinlogHandler(w http.ResponseWriter, r *http.Request) {
+	var result *defaultResult
+	defer func() { writeJson(w, result) }()
+
+	// Parse the JSON request body
+	var request struct {
+		CcrCommonRequest
+		SkipCommitSeq int64  `json:"skip_commit_seq"`
+		SkipBy        string `json:"skip_by,required"`
+	}
+	err := json.NewDecoder(r.Body).Decode(&request)
+	if err != nil {
+		log.Warnf("skip binlog failed: %+v", err)
+		result = newErrorResult(err.Error())
+		return
+	}
+
+	if request.Name == "" {
+		log.Warnf("skip binlog failed: name is empty")
+		result = newErrorResult("name is empty")
+		return
+	}
+
+	skipBy := strings.ToLower(request.SkipBy)
+	if skipBy != ccr.SkipBySilence && skipBy != ccr.SkipByFullSync {
+		log.Warnf("skip binlog failed: unknown skip way %s", request.SkipBy)
+		result = newErrorResult(fmt.Sprintf("unknown skip way: %s", request.SkipBy))
+		return
+	}
+
+	if request.SkipCommitSeq <= 0 && skipBy != "fullsync" {
+		log.Warnf("skip binlog failed: commit seq is not specified for %s, commit seq: %d",
+			request.SkipBy, request.SkipCommitSeq)
+		result = newErrorResult(fmt.Sprintf("commit seq is not specified for %s, commit seq: %d",
+			request.SkipBy, request.SkipCommitSeq))
+		return
+	}
+
+	if s.redirect(request.Name, w, r) {
+		return
+	}
+
+	log.Infof("skip binlog with %s, commit seq %d, job %s",
+		request.SkipBy, request.SkipCommitSeq, request.Name)
+	if err := s.jobManager.SkipBinlog(request.Name, request.SkipCommitSeq, request.SkipBy); err != nil {
+		log.Warnf("skip binlog failed: %+v", err)
+		result = newErrorResult(err.Error())
+	} else {
+		result = newSuccessResult()
+	}
+}
+
+func (s *HttpService) failpointHandler(w http.ResponseWriter, r *http.Request) {
+	log.Infof("inject failpoint")
+
+	var result *defaultResult
+	defer func() { writeJson(w, result) }()
+
+	// Parse the JSON request body
+	var request struct {
+		Name      string      `json:"name,required"` // the ccr job name
+		Failpoint string      `json:"failpoint,required"`
+		Value     interface{} `json:"value"`
+	}
+	err := json.NewDecoder(r.Body).Decode(&request)
+	if err != nil {
+		log.Warnf("inject failpoint failed: %+v", err)
+		result = newErrorResult(err.Error())
+		return
+	}
+
+	if request.Name == "" {
+		log.Warnf("inject failpoint failed: job name is empty")
+		result = newErrorResult("job name is empty")
+		return
+	} else if request.Failpoint == "" {
+		log.Infof("disable all failpoints")
+		utils.DisableFailpoint()
+	} else if request.Value != nil {
+		log.Infof("inject failpoint %s with value %+v, job %s",
+			request.Failpoint, request.Value, request.Name)
+		utils.InjectJobFailpoint(request.Name, request.Failpoint, request.Value)
+		if !utils.IsFailpointEnabled() {
+			utils.EnableFailpoint()
+		}
+	} else {
+		utils.RemoveJobFailpoint(request.Name, request.Failpoint)
+	}
+
+	result = newSuccessResult()
+}
+
 func (s *HttpService) RegisterHandlers() {
 	s.mux.HandleFunc("/version", s.versionHandler)
 	s.mux.HandleFunc("/create_ccr", s.createHandler)
-	s.mux.HandleFunc("/get_lag", s.getLagHandler)
 	s.mux.HandleFunc("/pause", s.pauseHandler)
 	s.mux.HandleFunc("/resume", s.resumeHandler)
 	s.mux.HandleFunc("/delete", s.deleteHandler)
-	s.mux.HandleFunc("/job_status", s.statusHandler)
 	s.mux.HandleFunc("/desync", s.desyncHandler)
-	s.mux.HandleFunc("/update_job", s.updateJobHandler)
+	s.mux.HandleFunc("/get_lag", s.getLagHandler)
 	s.mux.HandleFunc("/list_jobs", s.listJobsHandler)
 	s.mux.HandleFunc("/job_detail", s.jobDetailHandler)
+	s.mux.HandleFunc("/job_status", s.statusHandler)
 	s.mux.HandleFunc("/job_progress", s.jobProgressHandler)
 	s.mux.HandleFunc("/force_fullsync", s.forceFullsyncHandler)
 	s.mux.HandleFunc("/features", s.featuresHandler)
 	s.mux.HandleFunc("/update_host_mapping", s.updateHostMappingHandler)
+	s.mux.HandleFunc("/job_skip_binlog", s.skipBinlogHandler)
+	s.mux.HandleFunc("/failpoint", s.failpointHandler)
 	s.mux.Handle("/metrics", promhttp.Handler())
 }
 
