@@ -142,8 +142,8 @@ suite("test_ds_alt_prop_dy_pary") {
     assertTrue(helper.checkShowTimesOf("SHOW CREATE TABLE ${tableName}", existNewPartitionProperty, 60, "target"))
 
     def res = target_sql "SHOW CREATE TABLE ${tableName}"
-    assertTrue(res.contains("\"dynamic_partition.enable\" = \"false\""))
+    assertTrue(res[0][1].contains("\"dynamic_partition.enable\" = \"false\""))
 
     res = sql "SHOW CREATE TABLE ${tableName}"
-    assertTrue(res.contains("\"dynamic_partition.enable\" = \"true\""))
+    assertTrue(res[0][1].contains("\"dynamic_partition.enable\" = \"true\""))
 }
