@@ -1254,7 +1254,7 @@ func (s *Spec) LightningSchemaChange(srcDatabase, tableAlias string, lightningSc
 	sql = strings.Replace(sql, "REPLACE_IF_NOT_NULL NULL DEFAULT \"null\"",
 		"REPLACE_IF_NOT_NULL NULL DEFAULT NULL", 1)
 
-	sql = HandleSchemaChangeDefaultValue(lightningSchemaChange)
+	sql = HandleSchemaChangeDefaultValue(sql, lightningSchemaChange)
 
 	log.Infof("lighting schema change sql, rawSql: %s, sql: %s", rawSql, sql)
 	return s.Exec(sql)
@@ -1602,9 +1602,8 @@ func FilterUnsupportedProperties(modifyProperty *record.ModifyTableProperty) map
 	return validProperties
 }
 
-func HandleSchemaChangeDefaultValue(lightningSchemaChange *record.ModifyTableAddOrDropColumns) string {
+func HandleSchemaChangeDefaultValue(sql string, lightningSchemaChange *record.ModifyTableAddOrDropColumns) string {
 	indexSchemaMap := lightningSchemaChange.IndexSchemaMap[lightningSchemaChange.TableId]
-	sql := lightningSchemaChange.RawSql
 
 	for _, columnSchema := range indexSchemaMap {
 		if columnSchema.Type.Type != "VARCHAR" && columnSchema.DefaultValue != "" {
