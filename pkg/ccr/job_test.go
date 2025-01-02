@@ -37,3 +37,21 @@ func TestIsSessionVariableRequired(t *testing.T) {
 		}
 	}
 }
+
+func TestFilterStorageMediumFromCreateTableSql(t *testing.T) {
+	type TestCase struct {
+		origin, expect string
+	}
+	tests := []TestCase{
+		{
+			origin: "CREATE TABLE `test` ( `id` INT(11) NOT NULL, `name` VARCHAR(255) NOT NULL, `storage_medium` VARCHAR(255) NOT NULL ) ENGINE=OLAP DUPLICATE KEY(`id`) DISTRIBUTED BY HASH(`id`) BUCKETS 10 PROPERTIES (\"replication_allocation\" = \"tag.location.default: 1\", \"storage_medium\" = \"SSD\", \"is_being_synced\" = \"true\")",
+			expect: "CREATE TABLE `test` ( `id` INT(11) NOT NULL, `name` VARCHAR(255) NOT NULL, `storage_medium` VARCHAR(255) NOT NULL ) ENGINE=OLAP DUPLICATE KEY(`id`) DISTRIBUTED BY HASH(`id`) BUCKETS 10 PROPERTIES (\"replication_allocation\" = \"tag.location.default: 1\", \"is_being_synced\" = \"true\")",
+		},
+	}
+	for i, test := range tests {
+		sql := ccr.FilterStorageMediumFromCreateTableSql(test.origin)
+		if sql != test.expect {
+			t.Errorf("test %d failed, expect %s, but got %s", i, test.expect, sql)
+		}
+	}
+}
