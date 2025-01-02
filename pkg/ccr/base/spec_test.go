@@ -126,3 +126,71 @@ func TestCheckModifyTablePropertySql(t *testing.T) {
 		}
 	}
 }
+
+func TestHandleDefaultValue(t *testing.T) {
+	type TestCase struct {
+		origin record.ModifyTableAddOrDropColumns
+		expect string
+	}
+
+	testCases := []TestCase{
+		{
+			origin: record.ModifyTableAddOrDropColumns{
+				DbId:    0,
+				TableId: 0,
+				RawSql:  "ALTER TABLE `t` ADD COLUMN `test` DATETIME NOT NULL DEFAULT \"CURRENT_TIMESTAMP\" COMMENT 'test'",
+				IndexSchemaMap: map[int64][]record.ColumnSchema{
+					0: {
+						{Name: "test", Type: record.ColumnType{Type: "DATETIME"}, DefaultValue: "CURRENT_TIMESTAMP"},
+					},
+				},
+			},
+			expect: "ALTER TABLE `t` ADD COLUMN `test` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'test'",
+		},
+		{
+			origin: record.ModifyTableAddOrDropColumns{
+				DbId:    0,
+				TableId: 0,
+				RawSql:  "ALTER TABLE `t` ADD COLUMN `test` BITMAP NOT NULL DEFAULT \"BITMAP_EMPTY_DEFAULT_VALUE\" COMMENT 'test'",
+				IndexSchemaMap: map[int64][]record.ColumnSchema{
+					0: {
+						{Name: "test", Type: record.ColumnType{Type: "BITMAP"}, DefaultValue: "BITMAP_EMPTY_DEFAULT_VALUE"},
+					},
+				},
+			},
+			expect: "ALTER TABLE `t` ADD COLUMN `test` BITMAP NOT NULL DEFAULT BITMAP_EMPTY_DEFAULT_VALUE COMMENT 'test'",
+		},
+		{
+			origin: record.ModifyTableAddOrDropColumns{
+				DbId:    0,
+				TableId: 0,
+				RawSql:  "ALTER TABLE `t` ADD COLUMN `test` VARCHAR(10) NOT NULL DEFAULT \"BITMAP_EMPTY_DEFAULT_VALUE\" COMMENT 'test'",
+				IndexSchemaMap: map[int64][]record.ColumnSchema{
+					0: {
+						{Name: "test", Type: record.ColumnType{Type: "VARCHAR", Len: 10}, DefaultValue: "BITMAP_EMPTY_DEFAULT_VALUE"},
+					},
+				},
+			},
+			expect: "ALTER TABLE `t` ADD COLUMN `test` VARCHAR(10) NOT NULL DEFAULT \"BITMAP_EMPTY_DEFAULT_VALUE\" COMMENT 'test'",
+		},
+		{
+			origin: record.ModifyTableAddOrDropColumns{
+				DbId:    0,
+				TableId: 0,
+				RawSql:  "ALTER TABLE `t` ADD COLUMN `test` VARCHAR(10) NOT NULL DEFAULT \"CURRENT_TIMESTAMP\" COMMENT 'test'",
+				IndexSchemaMap: map[int64][]record.ColumnSchema{
+					0: {
+						{Name: "test", Type: record.ColumnType{Type: "VARCHAR", Len: 10}, DefaultValue: "CURRENT_TIMESTAMP"},
+					},
+				},
+			},
+			expect: "ALTER TABLE `t` ADD COLUMN `test` VARCHAR(10) NOT NULL DEFAULT \"CURRENT_TIMESTAMP\" COMMENT 'test'",
+		},
+	}
+
+	for i, c := range testCases {
+		if actual := base.HandleSchemaChangeDefaultValue(&c.origin); actual != c.expect {
+			t.Errorf("case %d failed, expect %s, but got %s", i, c.expect, actual)
+		}
+	}
+}
