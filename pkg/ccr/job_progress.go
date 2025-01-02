@@ -189,16 +189,22 @@ type JobProgress struct {
 	ShadowIndexes map[int64]int64 `json:"shadow_index_map,omitempty"`
 
 	// Some fields to save the unix epoch time of the key timepoint.
-	CreatedAt              int64 `json:"created_at,omitempty"`
-	FullSyncStartAt        int64 `json:"full_sync_start_at,omitempty"`
-	PartialSyncStartAt     int64 `json:"partial_sync_start_at,omitempty"`
-	IncrementalSyncStartAt int64 `json:"incremental_sync_start_at,omitempty"`
-	IngestBinlogAt         int64 `json:"ingest_binlog_at,omitempty"`
+	CreatedAt              int64        `json:"created_at,omitempty"`
+	FullSyncStartAt        int64        `json:"full_sync_start_at,omitempty"`
+	PartialSyncStartAt     int64        `json:"partial_sync_start_at,omitempty"`
+	IncrementalSyncStartAt int64        `json:"incremental_sync_start_at,omitempty"`
+	IngestBinlogAt         int64        `json:"ingest_binlog_at,omitempty"`
+	LastFullSyncInfo       FullSyncInfo `json:"last_full_sync_info,omitempty"`
+}
+
+type FullSyncInfo struct {
+	Reason string
+	Type   string
 }
 
 func (j *JobProgress) String() string {
 	// const maxStringLength = 64
-	return fmt.Sprintf("JobProgress{JobName: %s, SyncState: %s, SubSyncState: %s, CommitSeq: %d, TableCommitSeqMap: %v, InMemoryData: %.64v, PersistData: %.64s}", j.JobName, j.SyncState, j.SubSyncState, j.CommitSeq, j.TableCommitSeqMap, j.InMemoryData, j.PersistData)
+	return fmt.Sprintf("JobProgress{JobName: %s, SyncState: %s, SubSyncState: %s, CommitSeq: %d, TableCommitSeqMap: %v, InMemoryData: %.64v, PersistData: %.64s, LastFullSyncInfo: %.64s}", j.JobName, j.SyncState, j.SubSyncState, j.CommitSeq, j.TableCommitSeqMap, j.InMemoryData, j.PersistData, j.LastFullSyncInfo)
 }
 
 func NewJobProgress(jobName string, syncType SyncType, db storage.DB) *JobProgress {
@@ -229,6 +235,7 @@ func NewJobProgress(jobName string, syncType SyncType, db storage.DB) *JobProgre
 		FullSyncStartAt:        0,
 		IncrementalSyncStartAt: 0,
 		IngestBinlogAt:         0,
+		LastFullSyncInfo:       FullSyncInfo{},
 	}
 }
 
@@ -408,4 +415,11 @@ func (j *JobProgress) Persist() {
 
 	log.Tracef("update job progress done, state: %s, subState: %s, commitSeq: %d, prevCommitSeq: %d",
 		j.SyncState, j.SubSyncState, j.CommitSeq, j.PrevCommitSeq)
+}
+
+func (j *JobProgress) SetFullSyncInfo(info string, syncType SyncType) {
+	j.LastFullSyncInfo = FullSyncInfo{
+		Reason: info,
+		Type:   syncType.String(),
+	}
 }
