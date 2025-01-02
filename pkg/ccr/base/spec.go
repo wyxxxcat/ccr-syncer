@@ -1254,7 +1254,7 @@ func (s *Spec) LightningSchemaChange(srcDatabase, tableAlias string, lightningSc
 	sql = strings.Replace(sql, "REPLACE_IF_NOT_NULL NULL DEFAULT \"null\"",
 		"REPLACE_IF_NOT_NULL NULL DEFAULT NULL", 1)
 
-	sql = HandleDefaultValue(lightningSchemaChange)
+	sql = HandleSchemaChangeDefaultValue(lightningSchemaChange)
 
 	log.Infof("lighting schema change sql, rawSql: %s, sql: %s", rawSql, sql)
 	return s.Exec(sql)
