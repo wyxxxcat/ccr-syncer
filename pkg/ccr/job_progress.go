@@ -198,8 +198,8 @@ type JobProgress struct {
 }
 
 type FullSyncInfo struct {
-	Reason string
-	Type   string
+	Reason string `json:"reason"`
+	Type   string `json:"type"`
 }
 
 func (j *JobProgress) String() string {

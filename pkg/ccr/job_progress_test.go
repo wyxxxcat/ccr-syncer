@@ -58,6 +58,7 @@ func TestJobProgress_MarshalJSON(t *testing.T) {
 		InMemoryData      any
 		PersistData       string
 		TableAliases      map[string]string
+		LastFullSyncInfo  FullSyncInfo
 	}
 	tests := []struct {
 		name    string
@@ -78,6 +79,10 @@ func TestJobProgress_MarshalJSON(t *testing.T) {
 				InMemoryData:      nil,
 				PersistData:       "test-data",
 				TableAliases:      map[string]string{"table": "alias"},
+				LastFullSyncInfo: FullSyncInfo{
+					Reason: "test-reason",
+					Type:   "test-type",
+				},
 			},
 			want: `{
   "job_name": "test-job",
@@ -89,6 +94,7 @@ func TestJobProgress_MarshalJSON(t *testing.T) {
   "job_sync_id":0,
   "prev_commit_seq": 0,
   "commit_seq": 1,
+  "last_commit_seq":0,
   "table_mapping": null,
   "table_commit_seq_map": {
     "1": 2
@@ -96,6 +102,10 @@ func TestJobProgress_MarshalJSON(t *testing.T) {
   "data": "test-data",
   "table_aliases": {
     "table": "alias"
+  },
+  "last_full_sync_info": {
+	"reason": "test-reason",
+	"type": "test-type"
   }
 }`,
 			wantErr: false,
@@ -114,6 +124,7 @@ func TestJobProgress_MarshalJSON(t *testing.T) {
 				InMemoryData:      tt.fields.InMemoryData,
 				PersistData:       tt.fields.PersistData,
 				TableAliases:      tt.fields.TableAliases,
+				LastFullSyncInfo:  tt.fields.LastFullSyncInfo,
 			}
 			got, err := json.Marshal(jp)
 			if (err != nil) != tt.wantErr {
