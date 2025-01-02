@@ -65,6 +65,7 @@ var (
 	featureCompressedSnapshot           bool
 	featureSkipRollupBinlogs            bool
 	featureTxnInsert                    bool
+	featureFilterStorageMedium          bool
 
 	ErrMaterializedViewTable = xerror.NewWithoutStack(xerror.Meta, "Not support table type: materialized view")
 )
@@ -92,6 +93,8 @@ func init() {
 		"skip the rollup related binlogs")
 	flag.BoolVar(&featureTxnInsert, "feature_txn_insert", false,
 		"enable txn insert support")
+	flag.BoolVar(&featureFilterStorageMedium, "feature_filter_storage_medium", true,
+		"enable filter storage medium property")
 }
 
 type SyncType int
@@ -1926,6 +1929,10 @@ func (j *Job) handleCreateTable(binlog *festruct.TBinlog) error {
 		}
 	}
 
+	if featureFilterStorageMedium {
+		createTable.Sql = FilterStorageMediumFromCreateTableSql(createTable.Sql)
+	}
+
 	if err = j.IDest.CreateTableOrView(createTable, j.Src.Database); err != nil {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "Can not found function") {
@@ -3700,4 +3707,9 @@ func isStatusContainsAny(status *tstatus.TStatus, patterns ...string) bool {
 func IsSessionVariableRequired(msg string) bool {
 	re := regexp.MustCompile(`set enable_.+=.+|Incorrect column name .* Column regex is`)
 	return re.MatchString(msg)
+}
+
+func FilterStorageMediumFromCreateTableSql(createSql string) string {
+	pattern := `"storage_medium"\s*=\s*"[^"]*"(,\s*)?`
+	return regexp.MustCompile(pattern).ReplaceAllString(createSql, "")
 }
