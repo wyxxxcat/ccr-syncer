@@ -1614,7 +1614,7 @@ func FilterUnsupportedProperties(modifyProperty *record.ModifyTableProperty) map
 	return validProperties
 }
 
-func HandleDefaultValue(lightningSchemaChange *record.ModifyTableAddOrDropColumns) string {
+func HandleSchemaChangeDefaultValue(lightningSchemaChange *record.ModifyTableAddOrDropColumns) string {
 	indexSchemaMap := lightningSchemaChange.IndexSchemaMap[lightningSchemaChange.TableId]
 	sql := lightningSchemaChange.RawSql
 
