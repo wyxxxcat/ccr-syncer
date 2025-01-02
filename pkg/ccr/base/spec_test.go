@@ -189,7 +189,7 @@ func TestHandleDefaultValue(t *testing.T) {
 	}
 
 	for i, c := range testCases {
-		if actual := base.HandleSchemaChangeDefaultValue(&c.origin); actual != c.expect {
+		if actual := base.HandleSchemaChangeDefaultValue(c.origin.RawSql, &c.origin); actual != c.expect {
 			t.Errorf("case %d failed, expect %s, but got %s", i, c.expect, actual)
 		}
 	}
