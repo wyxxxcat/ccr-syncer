@@ -24,9 +24,28 @@ import (
 )
 
 type ModifyTableAddOrDropColumns struct {
-	DbId    int64  `json:"dbId"`
-	TableId int64  `json:"tableId"`
-	RawSql  string `json:"rawSql"`
+	DbId           int64                    `json:"dbId"`
+	TableId        int64                    `json:"tableId"`
+	RawSql         string                   `json:"rawSql"`
+	IndexSchemaMap map[int64][]ColumnSchema `json:"indexSchemaMap"`
+}
+
+type ColumnSchema struct {
+	Name         string     `json:"name"`
+	Type         ColumnType `json:"type"`
+	IsKey        bool       `json:"-"`
+	IsAllowNull  bool       `json:"-"`
+	DefaultValue string     `json:"defaultValue,omitempty"`
+	Comment      string     `json:"-"`
+	Visible      bool       `json:"-"`
+}
+
+type ColumnType struct {
+	Clazz     string `json:"-"`
+	Type      string `json:"type"`
+	Len       int    `json:"-"`
+	Precision int    `json:"-"`
+	Scale     int    `json:"-"`
 }
 
 func NewModifyTableAddOrDropColumnsFromJson(data string) (*ModifyTableAddOrDropColumns, error) {
