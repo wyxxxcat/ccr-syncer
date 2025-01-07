@@ -1305,7 +1305,6 @@ func (j *Job) getDestTableIdBySrc(srcTableId int64) (int64, error) {
 	}
 
 	srcTableName := srcTable.Name
-
 	if j.isTableSyncWithAlias() {
 		return j.Dest.TableId, nil
 	} else if destTableId, err := j.destMeta.GetTableId(srcTableName); err != nil {
