@@ -50,6 +50,10 @@ func TestJobProgress_MarshalJSON(t *testing.T) {
 		db                storage.DB
 		SyncState         SyncState
 		SubSyncState      SubSyncState
+		FirstCommitSeq    int64
+		FirstCommitTs     string
+		LastCommitSeq     int64
+		LastCommitTs      string
 		PrevCommitSeq     int64
 		CommitSeq         int64
 		TableMapping      map[int64]int64
@@ -74,6 +78,10 @@ func TestJobProgress_MarshalJSON(t *testing.T) {
 				SubSyncState:      BeginCreateSnapshot,
 				PrevCommitSeq:     0,
 				CommitSeq:         1,
+				FirstCommitSeq:    0,
+				FirstCommitTs:     "2025-01-09T10:04:40.289Z",
+				LastCommitSeq:     0,
+				LastCommitTs:      "2025-01-09T10:04:40.289Z",
 				TableCommitSeqMap: map[int64]int64{1: 2},
 				InMemoryData:      nil,
 				PersistData:       "test-data",
@@ -87,6 +95,10 @@ func TestJobProgress_MarshalJSON(t *testing.T) {
     "binlog_type": -1
   },
   "job_sync_id":0,
+  "first_commit_seq": 0,
+  "first_commit_ts": "2025-01-09T10:04:40.289Z",
+  "last_commit_seq": 0,
+  "last_commit_ts": "2025-01-09T10:04:40.289Z",
   "prev_commit_seq": 0,
   "commit_seq": 1,
   "table_mapping": null,
@@ -108,6 +120,10 @@ func TestJobProgress_MarshalJSON(t *testing.T) {
 				db:                tt.fields.db,
 				SyncState:         tt.fields.SyncState,
 				SubSyncState:      tt.fields.SubSyncState,
+				FirstCommitSeq:    tt.fields.FirstCommitSeq,
+				FirstCommitTs:     tt.fields.FirstCommitTs,
+				LastCommitSeq:     tt.fields.LastCommitSeq,
+				LastCommitTs:      tt.fields.LastCommitTs,
 				PrevCommitSeq:     tt.fields.PrevCommitSeq,
 				CommitSeq:         tt.fields.CommitSeq,
 				TableCommitSeqMap: tt.fields.TableCommitSeqMap,
@@ -133,6 +149,10 @@ func TestJobProgress_UnmarshalJSON(t *testing.T) {
 		db                storage.DB
 		SyncState         SyncState
 		SubSyncState      SubSyncState
+		FirstCommitSeq    int64
+		FirstCommitTs     string
+		LastCommitSeq     int64
+		LastCommitTs      string
 		CommitSeq         int64
 		TransactionId     int64
 		TableCommitSeqMap map[int64]int64
@@ -156,13 +176,17 @@ func TestJobProgress_UnmarshalJSON(t *testing.T) {
 				SyncState:         TableFullSync,
 				SubSyncState:      BeginCreateSnapshot,
 				CommitSeq:         1,
+				FirstCommitSeq:    0,
+				FirstCommitTs:     "2025-01-09T10:04:40.289Z",
+				LastCommitSeq:     0,
+				LastCommitTs:      "2025-01-09T10:04:40.289Z",
 				TransactionId:     2,
 				TableCommitSeqMap: map[int64]int64{1: 2},
 				InMemoryData:      nil,
 				PersistData:       "test-data",
 			},
 			args: args{
-				data: []byte(`{"job_name":"test-job","sync_state":500,"sub_sync_state":{"state":0,"binlog_type":-1},"commit_seq":1,"transaction_id":2,"table_commit_seq_map":{"1":2},"data":"test-data"}`),
+				data: []byte(`{"job_name":"test-job","sync_state":500,"sub_sync_state":{"state":0,"binlog_type":-1},"commit_seq":1,"first_commit_seq":0,"first_commit_ts":"2025-01-09T10:04:40.289Z","last_commit_seq":0,"last_commit_ts":"2025-01-09T10:04:40.289Z","transaction_id":2,"table_commit_seq_map":{"1":2},"data":"test-data"}`),
 			},
 			wantErr: false,
 		},
@@ -175,6 +199,10 @@ func TestJobProgress_UnmarshalJSON(t *testing.T) {
 				SyncState:         tt.fields.SyncState,
 				SubSyncState:      tt.fields.SubSyncState,
 				CommitSeq:         tt.fields.CommitSeq,
+				FirstCommitSeq:    tt.fields.FirstCommitSeq,
+				FirstCommitTs:     tt.fields.FirstCommitTs,
+				LastCommitSeq:     tt.fields.LastCommitSeq,
+				LastCommitTs:      tt.fields.LastCommitTs,
 				TableCommitSeqMap: tt.fields.TableCommitSeqMap,
 				InMemoryData:      tt.fields.InMemoryData,
 				PersistData:       tt.fields.PersistData,

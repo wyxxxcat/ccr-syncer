@@ -170,10 +170,13 @@ type JobProgress struct {
 	// The sync id of full/partial snapshot
 	SyncId int64 `json:"job_sync_id"`
 	// The commit seq where the target cluster has synced.
-	PrevCommitSeq int64           `json:"prev_commit_seq"`
-	CommitSeq     int64           `json:"commit_seq"`
-	LastCommitSeq int64           `json:"last_commit_seq"` // the last commit seq try to sync
-	TableMapping  map[int64]int64 `json:"table_mapping"`
+	PrevCommitSeq  int64           `json:"prev_commit_seq"`
+	CommitSeq      int64           `json:"commit_seq"`
+	FirstCommitSeq int64           `json:"first_commit_seq"`
+	FirstCommitTs  string          `json:"first_commit_ts"`
+	LastCommitSeq  int64           `json:"last_commit_seq"` // the last commit seq try to sync
+	LastCommitTs   string          `json:"last_commit_ts"`
+	TableMapping   map[int64]int64 `json:"table_mapping"`
 	// the upstream table id to name mapping, build during the fullsync,
 	// keep snapshot to avoid rename. it might be staled.
 	TableNameMapping  map[int64]string    `json:"table_name_mapping,omitempty"`
@@ -212,11 +215,15 @@ func NewJobProgress(jobName string, syncType SyncType, db storage.DB) *JobProgre
 		JobName: jobName,
 		db:      db,
 
-		SyncId:       time.Now().Unix(),
-		SyncState:    syncState,
-		SubSyncState: BeginCreateSnapshot,
-		CommitSeq:    0,
-		TableMapping: nil,
+		SyncId:         time.Now().Unix(),
+		SyncState:      syncState,
+		SubSyncState:   BeginCreateSnapshot,
+		CommitSeq:      0,
+		FirstCommitSeq: 0,
+		FirstCommitTs:  time.Now().Format(time.RFC3339),
+		LastCommitSeq:  0,
+		LastCommitTs:   time.Now().Format(time.RFC3339),
+		TableMapping:   nil,
 
 		TableCommitSeqMap: nil,
 		InMemoryData:      nil,
@@ -272,7 +279,7 @@ func (j *JobProgress) GetTableId(tableName string) (int64, bool) {
 func (j *JobProgress) StartHandle(commitSeq int64) {
 	j.CommitSeq = commitSeq
 	j.LastCommitSeq = commitSeq
-
+	j.LastCommitTs = time.Now().Format(time.RFC3339)
 	j.Persist()
 }
 

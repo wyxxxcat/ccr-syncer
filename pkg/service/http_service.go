@@ -222,7 +222,11 @@ func (s *HttpService) getLagHandler(w http.ResponseWriter, r *http.Request) {
 
 	type result struct {
 		*defaultResult
-		Lag int64 `json:"lag"`
+		Lag            int64  `json:"lag"`
+		FirstCommitSeq int64  `json:"first_commit_seq"`
+		LastCommitSeq  int64  `json:"last_commit_seq"`
+		FirstCommitTs  string `json:"first_commit_ts"`
+		LastCommitTs   string `json:"last_commit_ts"`
 	}
 	var lagResult *result
 	defer func() { writeJson(w, lagResult) }()
@@ -298,6 +302,10 @@ func (s *HttpService) getLagHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	commitSeq := jobProgress.CommitSeq
+	firstCommitSeq := jobProgress.FirstCommitSeq
+	lastCommitSeq := jobProgress.LastCommitSeq
+	firstCommitTs := jobProgress.FirstCommitTs
+	lastCommitTs := jobProgress.LastCommitTs
 	resp, err := rpc.GetBinlogLag(srcSpec, commitSeq)
 	if err != nil {
 		log.Warnf("rpc get bin log failed: %+v", err)
@@ -310,8 +318,12 @@ func (s *HttpService) getLagHandler(w http.ResponseWriter, r *http.Request) {
 	lag := resp.GetLag()
 
 	lagResult = &result{
-		defaultResult: newSuccessResult(),
-		Lag:           lag,
+		defaultResult:  newSuccessResult(),
+		Lag:            lag,
+		FirstCommitSeq: firstCommitSeq,
+		LastCommitSeq:  lastCommitSeq,
+		FirstCommitTs:  firstCommitTs,
+		LastCommitTs:   lastCommitTs,
 	}
 }
 
