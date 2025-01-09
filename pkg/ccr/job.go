@@ -984,7 +984,7 @@ func (j *Job) fullSync() error {
 				AliasName: &j.Dest.Table,
 			}
 			if alias, ok := j.progress.TableAliases[j.Dest.Table]; ok {
-				log.Infof("fullsync alias with table ref %s", alias)
+				log.Infof("fullsync alias dest table %s to %s", j.Dest.Table, alias)
 				tableRef.AliasName = &alias
 			}
 			tableRefs = append(tableRefs, tableRef)
