@@ -1411,6 +1411,40 @@ func (j *Job) getDbSyncTableRecords(upsert *record.Upsert) []*record.TableRecord
 	return tableRecords
 }
 
+func (j *Job) getStidsByDestTableId(destTableId int64, tableRecords []*record.TableRecord, stidMaps map[int64]int64) ([]int64, error) {
+	destStids := make([]int64, 0, 1)
+	uniqStids := make(map[int64]int64)
+
+	// first, get the source table id from j.progress.TableMapping
+	for sourceId, destId := range j.progress.TableMapping {
+		if destId != destTableId {
+			continue
+		}
+
+		// second, get the source stids from tableRecords
+		for _, tableRecord := range tableRecords {
+			if tableRecord.Id != sourceId {
+				continue
+			}
+
+			// third, get dest stids from partition
+			for _, partition := range tableRecord.PartitionRecords {
+				destStid := stidMaps[partition.Stid]
+				if destStid != 0 {
+					uniqStids[destStid] = 1
+				}
+			}
+		}
+	}
+
+	// dest stids may be repeated, get the unique stids
+	for key := range uniqStids {
+		destStid := key
+		destStids = append(destStids, destStid)
+	}
+	return destStids, nil
+}
+
 func (j *Job) getRelatedTableRecords(upsert *record.Upsert) ([]*record.TableRecord, error) {
 	var tableRecords []*record.TableRecord //, 0, len(upsert.TableRecords))
 
@@ -1478,11 +1512,13 @@ func (j *Job) ingestBinlogForTxnInsert(txnId int64, tableRecords []*record.Table
 
 	stidToCommitInfos := ingestBinlogJob.SubTxnToCommitInfos()
 	subTxnInfos := make([]*festruct.TSubTxnInfo, 0, len(stidMap))
-	for sourceStid, destStid := range stidMap {
-		destStid := destStid // if no this line, every element in subTxnInfos is the last tSubTxnInfo
+	destStids, err := j.getStidsByDestTableId(destTableId, tableRecords, stidMap)
+
+	for _, destStid := range destStids {
+		destStid := destStid
 		commitInfos := stidToCommitInfos[destStid]
 		if commitInfos == nil {
-			log.Warnf("no commit infos from source stid: %d; dest stid %d, just skip", sourceStid, destStid)
+			log.Warnf("no commit infos from dest stid %d, just skip", destStid)
 			continue
 		}
 
@@ -1593,10 +1629,6 @@ func (j *Job) handleUpsert(binlog *festruct.TBinlog) error {
 			if !featureTxnInsert {
 				log.Warnf("The txn insert is not supported yet")
 				return xerror.Errorf(xerror.Normal, "The txn insert is not supported yet")
-			}
-			if j.SyncType == DBSync {
-				log.Warnf("Txn insert is NOT supported when DBSync")
-				return xerror.Errorf(xerror.Normal, "Txn insert is NOT supported when DBSync")
 			}
 			isTxnInsert = true
 		}
@@ -1726,18 +1758,20 @@ func (j *Job) handleUpsert(binlog *festruct.TBinlog) error {
 
 		// Step 3: ingest binlog
 		if isTxnInsert {
-			// When txn insert, only one table can be inserted, so use the first DestTableId
-			destTableId := inMemoryData.DestTableIds[0]
-
-			// When txn insert, use subTxnInfos to commit rather than commitInfos.
-			subTxnInfos, err := j.ingestBinlogForTxnInsert(txnId, tableRecords, stidMap, destTableId)
-			if err != nil {
-				rollback(err, inMemoryData)
-				return err
-			} else {
-				inMemoryData.SubTxnInfos = subTxnInfos
-				j.progress.NextSubCheckpoint(CommitTransaction, inMemoryData)
+			var allSubTxnInfos = make([]*festruct.TSubTxnInfo, 0, len(stidMap))
+			for _, destTableId := range inMemoryData.DestTableIds {
+				// When txn insert, use subTxnInfos to commit rather than commitInfos.
+				subTxnInfos, err := j.ingestBinlogForTxnInsert(txnId, tableRecords, stidMap, destTableId)
+				if err != nil {
+					rollback(err, inMemoryData)
+					return err
+				} else {
+					subTxnInfos := subTxnInfos
+					allSubTxnInfos = append(allSubTxnInfos, subTxnInfos...)
+					j.progress.NextSubCheckpoint(CommitTransaction, inMemoryData)
+				}
 			}
+			inMemoryData.SubTxnInfos = allSubTxnInfos
 		} else {
 			commitInfos, err := j.ingestBinlog(txnId, tableRecords)
 			if err != nil {
