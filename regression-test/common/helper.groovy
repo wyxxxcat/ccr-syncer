@@ -424,13 +424,16 @@ class Helper {
         if (source == "sql") {
             res = suite.sql_return_maparray "DESC ${table} ALL"
         } else {
+            if (alias != null) {
+                table = alias
+            }
             res = suite.target_sql_return_maparray "DESC ${table} ALL"
         }
 
         def map = Maps.newHashMap()
         def index = ""
         for (def row : res) {
-            if (row.IndexName != "") {
+            if (row.IndexName != "" && row.IndexName != table) {
                 index = row.IndexName
             }
             if (row.Field == "") {
