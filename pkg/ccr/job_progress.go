@@ -189,11 +189,19 @@ type JobProgress struct {
 	ShadowIndexes map[int64]int64 `json:"shadow_index_map,omitempty"`
 
 	// Some fields to save the unix epoch time of the key timepoint.
-	CreatedAt              int64 `json:"created_at,omitempty"`
-	FullSyncStartAt        int64 `json:"full_sync_start_at,omitempty"`
-	PartialSyncStartAt     int64 `json:"partial_sync_start_at,omitempty"`
-	IncrementalSyncStartAt int64 `json:"incremental_sync_start_at,omitempty"`
-	IngestBinlogAt         int64 `json:"ingest_binlog_at,omitempty"`
+	CreatedAt              int64        `json:"created_at,omitempty"`
+	FullSyncStartAt        int64        `json:"full_sync_start_at,omitempty"`
+	PartialSyncStartAt     int64        `json:"partial_sync_start_at,omitempty"`
+	IncrementalSyncStartAt int64        `json:"incremental_sync_start_at,omitempty"`
+	IngestBinlogAt         int64        `json:"ingest_binlog_at,omitempty"`
+	FullSyncInfo           FullSyncInfo `json:"full_sync_info,omitempty"`
+}
+
+type FullSyncInfo struct {
+	PrevCommitSeq int64        `json:"prev_commit_seq"`
+	CommitSeq     int64        `json:"commit_seq"`
+	SubSyncState  SubSyncState `json:"sub_sync_state"`
+	Info          string       `json:"info"`
 }
 
 func (j *JobProgress) String() string {
@@ -408,4 +416,11 @@ func (j *JobProgress) Persist() {
 
 	log.Tracef("update job progress done, state: %s, subState: %s, commitSeq: %d, prevCommitSeq: %d",
 		j.SyncState, j.SubSyncState, j.CommitSeq, j.PrevCommitSeq)
+}
+
+func (j *JobProgress) SetFullSyncInfo(info string) {
+	j.FullSyncInfo.Info = info
+	j.FullSyncInfo.CommitSeq = j.CommitSeq
+	j.FullSyncInfo.PrevCommitSeq = j.PrevCommitSeq
+	j.FullSyncInfo.SubSyncState = j.SubSyncState
 }
