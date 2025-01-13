@@ -116,7 +116,7 @@ func TestJobProgress_MarshalJSON(t *testing.T) {
 				PersistData:       tt.fields.PersistData,
 				TableAliases:      tt.fields.TableAliases,
 			}
-			got, err := json.MarshalIndent(jp, "", "")
+			got, err := json.MarshalIndent(jp, "", " ")
 			if (err != nil) != tt.wantErr {
 				t.Errorf("JobProgress.MarshalJSON() error = %v, wantErr %v", err, tt.wantErr)
 				return
