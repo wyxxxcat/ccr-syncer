@@ -34,6 +34,24 @@ suite("test_ds_alt_prop_skip_bitmap_column") {
         return res.size() != 0
     }
 
+    def hasHiddenCol = { res -> Boolean
+        for (List<Object> row : res) {
+            if ((row[0] as String) == "__DORIS_SKIP_BITMAP_COL__") {
+                return true
+            }
+        }
+        return false
+    }
+
+    def notHasHiddenCol = { res -> Boolean
+        for (List<Object> row : res) {
+            if ((row[0] as String) == "__DORIS_SKIP_BITMAP_COL__") {
+                return false
+            }
+        }
+        return true
+    }
+
     def notEnableSkip = { res -> Boolean
         return !res[0][1].contains("\"enable_unique_key_skip_bitmap_column\" = \"true\"")
     }
@@ -94,5 +112,11 @@ suite("test_ds_alt_prop_skip_bitmap_column") {
 
     assertTrue(helper.checkShowTimesOf("SHOW CREATE TABLE ${tableName}", enableSkip, 60, "sql"))
 
-    assertTrue(helper.checkShowTimesOf("SHOW COLUMNS FROM ${tableName} WHERE Field = \"__DORIS_SKIP_BITMAP_COL__\"", exist, 30, "target"))
+    target_sql "set show_hidden_columns=false;"
+
+    assertTrue(helper.checkShowTimesOf("DESC ${tableName}", notHasHiddenCol, 30, "target"))
+
+    target_sql "set show_hidden_columns=true;"
+
+    assertTrue(helper.checkShowTimesOf("DESC ${tableName}", hasHiddenCol, 30, "target"))
 }
