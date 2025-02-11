@@ -1,3 +1,4 @@
+from itertools import count
 import random
 import string
 from time import sleep
@@ -11,15 +12,13 @@ class DDLGenerator:
         self.table_columns = {}  
         self._init_table_columns() 
         self.partitioned_tables = {}  # {table_name: partition_config}
-        self.rename_counter = 4
-        self.replace_counter = 0
         self.col_counter = 0
         self.table_partition_type = {}  # {table_name: partition_type}
 
     def _init_table_columns(self):
         for table in self.executor.get_table_names():
             self.table_columns[table] = self.executor.get_table_columns(table)
-            self.partition_type = self.executor.get_partition_type(table)
+            self.table_partition_type = self.executor.get_partition_type(table)
 
     def generate_add_partition(self):
         if not self.partitioned_tables:
@@ -59,6 +58,8 @@ class DDLGenerator:
         table_name = random.choice(list(self.executor.get_table_names()))
         new_col = f"new_col_{''.join(random.choices(string.ascii_lowercase, k=3))}"
         data_type = random.choice(["INT", "VARCHAR(100)", "DATE"])
+        if table_name not in self.table_columns:
+            self.table_columns[table_name] = []
         self.table_columns[table_name].append(new_col)
         return f"ALTER TABLE {table_name} ADD COLUMN {new_col} {data_type};"
 
@@ -83,39 +84,21 @@ class DDLGenerator:
 
         rollup_name = f"r_{''.join(random.choices(string.digits, k=3))}"
 
-        # from_clause = ""
-        # if random.random() < 0.3:
-        #     from_clause = f" FROM r_{random.randint(100, 999)}"
-
-        # properties = ""
-        # if random.random() < 0.5:
-        #     props = {
-        #         "replication_num": str(random.randint(1, 3)),
-        #         "storage_type": random.choice(["COLUMN", "ROW"]),
-        #         "compress": random.choice(["true", "false"])
-        #     }
-        #     # 随机保留1-2个属性
-        #     selected_props = dict(random.sample(list(props.items()), k=random.randint(1,2)))
-        #     properties = " PROPERTIES (" + ", ".join(
-        #         [f'"{k}" = "{v}"' for k, v in selected_props.items()]
-        #     ) + ")"
-
         return f"ALTER TABLE {table_name} ADD ROLLUP {rollup_name} ({', '.join(rollup_columns)});"
 
     def generate_alter_table_rename(self):
         if not self.executor.get_table_names():
             return None
         old_table_name = random.choice(list(self.executor.get_table_names()))
-        new_table_name = f"t{self.rename_counter}"
-        self.rename_counter += 1
-        return f"ALTER TABLE {old_table_name} RENAME {new_table_name};"
+        new_table_name = random.choice(list(self.executor.get_table_names()))
+        random_prefix = ''.join(random.choices(string.ascii_lowercase, k=3))
+        return f"ALTER TABLE {old_table_name} RENAME {random_prefix}_{new_table_name};"
 
     def generate_alter_table_replace(self):
         if not self.executor.get_table_names():
             return None
         table_name = random.choice(list(self.executor.get_table_names()))
-        replaced_table = self.replace_counter + 1
-        self.replace_counter += 1
+        replaced_table = random.choice(list(self.executor.get_table_names()))
         return f"ALTER TABLE {table_name} REPLACE WITH TABLE {replaced_table};"
 
     def generate_alter_table_order_by(self):
@@ -124,6 +107,8 @@ class DDLGenerator:
 
 
         table_name = random.choice(list(self.executor.get_table_names()))
+        if table_name not in self.table_columns:
+            return None
         all_columns = self.table_columns[table_name]
 
         first_column = all_columns[0]
@@ -136,11 +121,32 @@ class DDLGenerator:
             from_clause = f" FROM {random.choice(list(self.partitioned_tables[table_name]))}"
 
         return f"ALTER TABLE {table_name} ORDER BY ({', '.join(ordered_columns)}){from_clause};"
+    
+    def generate_create_index(self):
+        index_name = ''.join(random.choices(string.ascii_lowercase, k=3)) + "_index"
+        table_name = random.choice(list(self.executor.get_table_names()))
+        if table_name not in self.table_columns:
+            return None
+        available_columns = self.table_columns[table_name]
+
+        index_column  = random.sample(available_columns, k=random.randint(1, min(2, len(available_columns))))
+        bitmap = random.choice(["USING BITMAP", ""])
+        return f"CREATE INDEX {index_name} ON {table_name} ({', '.join(index_column)}) {bitmap};"
+
+    def generate_create_view(self):
+        view_name = ''.join(random.choices(string.ascii_lowercase, k=3)) + "_view"
+        table_name = random.choice(list(self.executor.get_table_names()))
+        if table_name not in self.table_columns:
+            return None
+        available_columns = self.table_columns[table_name]
+        view_column = random.sample(available_columns, k=random.randint(1, min(2, len(available_columns))))
+        return f"CREATE VIEW {view_name} AS SELECT {', '.join(view_column)} FROM {table_name};"
 
     def generate_random_ddl(self):
         operation = random.choices(
-            ["ADD_COLUMN", "ADD_PARTITION", "ADD_ROLLUP", "ORDER_BY", "RENAME", "REPLACE"],
-            weights=[0.3, 0.2, 0.1, 0.1, 0.1, 0.1],
+            # order by error too easily
+            ["ADD_COLUMN", "ADD_PARTITION", "ADD_ROLLUP", "RENAME", "REPLACE", "CREATE INDEX", "CREATE VIEW"],
+            weights=[0.3, 0.2, 0.1, 0.1, 0.1, 0.2, 0.2],
             k=1
         )[0]
 
@@ -156,6 +162,10 @@ class DDLGenerator:
             return self.generate_alter_table_rename()
         elif operation == "REPLACE":
             return self.generate_alter_table_replace()
+        elif operation == "CREATE INDEX":
+            return self.generate_create_index()
+        elif operation == "CREATE VIEW":
+            return self.generate_create_view()
         return None
 
 class DDLExecutor:
@@ -192,7 +202,18 @@ class DDLExecutor:
             if not tables:
                 print("No tables found in the database!")
                 return set()
-            return set(table[0] for table in tables)
+            
+            table_names = set()
+            for table in tables:
+                table_name = table[0]
+                cursor.execute(f"SHOW CREATE TABLE {table_name}")
+                result = cursor.fetchone()
+                if result is not None:
+                    create_table_sql = result[1]
+                    if "CREATE TABLE" in create_table_sql:
+                        table_names.add(table_name)
+            
+            return table_names
         except Error as e:
             print(f"Error fetching tables: {e}")
             return set()
@@ -269,7 +290,7 @@ if __name__ == "__main__":
         "port": "9330",
         "user": "root",
         "password": "",
-        "database": "test_db"
+        "database": "db"
     }
 
     executor = DDLExecutor(**DB_CONFIG)
@@ -281,8 +302,9 @@ if __name__ == "__main__":
         exit()
 
     generator = DDLGenerator(executor)
+    count = 50
 
-    while True:
+    for i in range(count):
         ddl = generator.generate_random_ddl()
         if ddl:
             print("\n" + "="*50 + "\n")
