@@ -37,9 +37,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-var errNotFoundDestMappingTableId = xerror.NewWithoutStack(xerror.Meta, "not found dest mapping table id")
-var errTriggerPartialSnapshot = xerror.NewWithoutStack(xerror.Normal, "trigger new partial snapshot")
-
 type commitInfosCollector struct {
 	commitInfos     []*ttypes.TTabletCommitInfo
 	commitInfosLock sync.Mutex
@@ -585,7 +582,7 @@ func (j *IngestBinlogJob) prepareTable(tableRecord *record.TableRecord) {
 		destTableId = job.Dest.TableId
 	case DBSync:
 		srcTableId = tableRecord.Id
-		destTableId, err = job.getDestTableIdBySrc(tableRecord.Id)
+		destTableId, err = job.GetDestTableIdBySrc(tableRecord.Id)
 		if err != nil {
 			break
 		}
@@ -716,7 +713,7 @@ func (j *IngestBinlogJob) prepareMeta() {
 			if destTableId, ok := j.tableMapping[srcTableId]; ok {
 				destTableIds = append(destTableIds, destTableId)
 			} else {
-				err := xerror.XWrapf(errNotFoundDestMappingTableId, "src table id: %d", srcTableId)
+				err := xerror.XWrapf(ErrNotFoundDestMappingTableId, "src table id: %d", srcTableId)
 				j.setError(err)
 				return
 			}
@@ -773,7 +770,7 @@ func (j *IngestBinlogJob) applyDropRollupBinlog() {
 				Replace:    true,
 				IsView:     false,
 			}
-			j.setError(errTriggerPartialSnapshot)
+			j.setError(ErrTriggerPartialSnapshot)
 			return
 		}
 

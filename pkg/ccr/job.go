@@ -32,6 +32,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/bytedance/gopkg/util/logger"
 	"github.com/selectdb/ccr_syncer/pkg/ccr/base"
 	"github.com/selectdb/ccr_syncer/pkg/ccr/record"
 	"github.com/selectdb/ccr_syncer/pkg/rpc"
@@ -68,16 +69,18 @@ var (
 	featureReuseRunningBackupRestoreJob bool
 	featureCompressedSnapshot           bool
 	featureSkipRollupBinlogs            bool
-	featureTxnInsert                    bool
+	FeatureTxnInsert                    bool
 	featureFilterStorageMedium          bool
 	featureRestoreReplaceDiffSchema     bool
 	featureIdempotentDDL                bool
-	featureSkipWaitingTxnPublish        bool
+	FeatureSkipWaitingTxnPublish        bool
 	featureSkipCheckAsyncMvTable        bool
 
 	flagBinlogBatchSize int64
 
-	ErrMaterializedViewTable = xerror.NewWithoutStack(xerror.Meta, "Not support table type: materialized view")
+	ErrMaterializedViewTable      = xerror.NewWithoutStack(xerror.Meta, "Not support table type: materialized view")
+	ErrNotFoundDestMappingTableId = xerror.NewWithoutStack(xerror.Meta, "not found dest mapping table id")
+	ErrTriggerPartialSnapshot     = xerror.NewWithoutStack(xerror.Normal, "trigger new partial snapshot")
 )
 
 func init() {
@@ -101,7 +104,7 @@ func init() {
 		"compress the snapshot job info and meta")
 	flag.BoolVar(&featureSkipRollupBinlogs, "feature_skip_rollup_binlogs", false,
 		"skip the rollup related binlogs")
-	flag.BoolVar(&featureTxnInsert, "feature_txn_insert", false,
+	flag.BoolVar(&FeatureTxnInsert, "feature_txn_insert", false,
 		"enable txn insert support")
 	flag.BoolVar(&featureFilterStorageMedium, "feature_filter_storage_medium", true,
 		"enable filter storage medium property")
@@ -109,7 +112,7 @@ func init() {
 		"replace the table with different schema during restore")
 	flag.BoolVar(&featureIdempotentDDL, "feature_idempotent_ddl", true,
 		"enable idempotent ddl by checking the dest table schema before rolling back")
-	flag.BoolVar(&featureSkipWaitingTxnPublish, "feature_skip_waiting_txn_publish", true,
+	flag.BoolVar(&FeatureSkipWaitingTxnPublish, "feature_skip_waiting_txn_publish", true,
 		"skip waiting for the txn publish")
 	flag.BoolVar(&featureSkipCheckAsyncMvTable, "feature_skip_check_async_mv_table", true,
 		"skip checking async mv table, the async mv binlogs will be filtered by doris")
@@ -225,6 +228,19 @@ type JobContext struct {
 	AllowTableExists bool
 	ReuseBinlogLabel bool
 	Factory          *Factory
+}
+
+type InMemoryData struct {
+	CommitSeq    int64                       `json:"commit_seq"`
+	TxnId        int64                       `json:"txn_id"`
+	DestTableIds []int64                     `json:"dest_table_ids"`
+	TableRecords []*record.TableRecord       `json:"table_records"`
+	CommitInfos  []*ttypes.TTabletCommitInfo `json:"commit_infos"`
+	IsTxnInsert  bool                        `json:"is_txn_insert"`
+	SourceStids  []int64                     `json:"source_stid"`
+	DestStids    []int64                     `json:"desc_stid"`
+	SubTxnInfos  []*festruct.TSubTxnInfo     `json:"sub_txn_infos"`
+	Label        string                      `json:"label"`
 }
 
 // new job
@@ -1392,7 +1408,7 @@ func (j *Job) persistJob() error {
 	return nil
 }
 
-func (j *Job) newLabel(commitSeq int64) string {
+func (j *Job) NewLabel(commitSeq int64) string {
 	src := &j.Src
 	dest := &j.Dest
 	randNum := rand.Intn(65536) // hex 4 chars
@@ -1443,7 +1459,7 @@ func (j *Job) IsMaterializedViewTable(srcTableId int64) (bool, error) {
 	return false, nil
 }
 
-func (j *Job) getDestTableIdBySrc(srcTableId int64) (int64, error) {
+func (j *Job) GetDestTableIdBySrc(srcTableId int64) (int64, error) {
 	if j.SyncType == TableSync {
 		return j.Dest.TableId, nil
 	}
@@ -1478,7 +1494,7 @@ func (j *Job) GetDestNameBySrcId(srcTableId int64) (string, error) {
 		return j.Dest.Table, nil
 	}
 
-	destTableId, err := j.getDestTableIdBySrc(srcTableId)
+	destTableId, err := j.GetDestTableIdBySrc(srcTableId)
 	if err != nil {
 		return "", err
 	}
@@ -1580,7 +1596,7 @@ func (j *Job) getStidsByDestTableId(destTableId int64, tableRecords []*record.Ta
 	return destStids
 }
 
-func (j *Job) getRelatedTableRecords(upsert *record.Upsert) ([]*record.TableRecord, error) {
+func (j *Job) GetRelatedTableRecords(upsert *record.Upsert) ([]*record.TableRecord, error) {
 	var tableRecords []*record.TableRecord //, 0, len(upsert.TableRecords))
 
 	switch j.SyncType {
@@ -1622,7 +1638,7 @@ func (j *Job) getRelatedTableRecords(upsert *record.Upsert) ([]*record.TableReco
 }
 
 // Table ingestBinlog
-func (j *Job) ingestBinlog(commitSeq, txnId int64, tableRecords []*record.TableRecord) ([]*ttypes.TTabletCommitInfo, error) {
+func (j *Job) IngestBinlog(commitSeq, txnId int64, tableRecords []*record.TableRecord) ([]*ttypes.TTabletCommitInfo, error) {
 	log.Tracef("txn %d ingest binlog, commitSeq: %d", txnId, commitSeq)
 
 	job, err := j.jobFactory.CreateJob(NewIngestContext(commitSeq, txnId, tableRecords, j.progress.TableMapping), j, "IngestBinlog")
@@ -1643,8 +1659,8 @@ func (j *Job) ingestBinlog(commitSeq, txnId int64, tableRecords []*record.TableR
 }
 
 // Table ingestBinlog for txn insert
-func (j *Job) ingestBinlogForTxnInsert(commitSeq, txnId int64, tableRecords []*record.TableRecord, stidMap map[int64]int64, destTableId int64) ([]*festruct.TSubTxnInfo, error) {
-	log.Infof("txn %d ingestBinlogForTxnInsert, commitSeq: %d", txnId, commitSeq)
+func (j *Job) IngestBinlogForTxnInsert(commitSeq, txnId int64, tableRecords []*record.TableRecord, stidMap map[int64]int64, destTableId int64) ([]*festruct.TSubTxnInfo, error) {
+	log.Infof("txn %d IngestBinlogForTxnInsert, commitSeq: %d", txnId, commitSeq)
 
 	job, err := j.jobFactory.CreateJob(NewIngestContextForTxnInsert(commitSeq, txnId, tableRecords, j.progress.TableMapping, stidMap), j, "IngestBinlog")
 	if err != nil {
@@ -1706,23 +1722,11 @@ func (j *Job) handleUpsert(binlog *festruct.TBinlog) error {
 		j.progress.SubSyncState, j.progress.PrevCommitSeq, j.progress.CommitSeq)
 
 	// inMemory will be update in state machine, but progress keep any, so progress.inMemory is also latest, well call NextSubCheckpoint don't need to upate inMemory in progress
-	type inMemoryData struct {
-		CommitSeq    int64                       `json:"commit_seq"`
-		TxnId        int64                       `json:"txn_id"`
-		DestTableIds []int64                     `json:"dest_table_ids"`
-		TableRecords []*record.TableRecord       `json:"table_records"`
-		CommitInfos  []*ttypes.TTabletCommitInfo `json:"commit_infos"`
-		IsTxnInsert  bool                        `json:"is_txn_insert"`
-		SourceStids  []int64                     `json:"source_stid"`
-		DestStids    []int64                     `json:"desc_stid"`
-		SubTxnInfos  []*festruct.TSubTxnInfo     `json:"sub_txn_infos"`
-		Label        string                      `json:"label"`
-	}
 
 	updateInMemory := func() error {
 		if j.progress.InMemoryData == nil {
 			persistData := j.progress.PersistData
-			inMemoryData := &inMemoryData{}
+			inMemoryData := &InMemoryData{}
 			if err := json.Unmarshal([]byte(persistData), inMemoryData); err != nil {
 				return xerror.Errorf(xerror.Normal, "unmarshal persistData failed, persistData: %s", persistData)
 			}
@@ -1731,14 +1735,14 @@ func (j *Job) handleUpsert(binlog *festruct.TBinlog) error {
 		return nil
 	}
 
-	rollback := func(err error, inMemoryData *inMemoryData) {
+	rollback := func(err error, inMemoryData *InMemoryData) {
 		log.Errorf("txn %d need rollback, commitSeq: %d, label: %s, err: %+v",
 			inMemoryData.TxnId, inMemoryData.CommitSeq, inMemoryData.Label, err)
 		j.progress.NextSubCheckpoint(RollbackTransaction, inMemoryData)
 	}
 
 	committed := func() {
-		inMemoryData := j.progress.InMemoryData.(*inMemoryData)
+		inMemoryData := j.progress.InMemoryData.(*InMemoryData)
 		log.Debugf("txn %d committed, commitSeq: %d, cleanup", inMemoryData.TxnId, j.progress.CommitSeq)
 		commitSeq := j.progress.CommitSeq
 		destTableIds := inMemoryData.DestTableIds
@@ -1777,14 +1781,14 @@ func (j *Job) handleUpsert(binlog *festruct.TBinlog) error {
 		// Step 1: get related tableRecords
 		var isTxnInsert bool = false
 		if len(upsert.Stids) > 0 {
-			if !featureTxnInsert {
+			if !FeatureTxnInsert {
 				log.Warnf("The txn insert is not supported yet")
 				return xerror.Errorf(xerror.Normal, "The txn insert is not supported yet")
 			}
 			isTxnInsert = true
 		}
 
-		tableRecords, err := j.getRelatedTableRecords(upsert)
+		tableRecords, err := j.GetRelatedTableRecords(upsert)
 		if err != nil {
 			log.Errorf("get related table records failed, err: %+v", err)
 			return err
@@ -1803,7 +1807,7 @@ func (j *Job) handleUpsert(binlog *festruct.TBinlog) error {
 				} else if isAsyncMv {
 					// ignore the upsert of materialized view table.
 					continue
-				} else if destTableId, err := j.getDestTableIdBySrc(tableRecord.Id); err != nil {
+				} else if destTableId, err := j.GetDestTableIdBySrc(tableRecord.Id); err != nil {
 					return err
 				} else {
 					savedRecords = append(savedRecords, tableRecord)
@@ -1820,7 +1824,7 @@ func (j *Job) handleUpsert(binlog *festruct.TBinlog) error {
 		}
 
 		log.Debugf("handle upsert, table records: %v", tableRecords)
-		inMemoryData := &inMemoryData{
+		inMemoryData := &InMemoryData{
 			CommitSeq:    upsert.CommitSeq,
 			DestTableIds: destTableIds,
 			TableRecords: tableRecords,
@@ -1832,7 +1836,7 @@ func (j *Job) handleUpsert(binlog *festruct.TBinlog) error {
 
 	case BeginTransaction:
 		// Step 2: begin txn
-		inMemoryData := j.progress.InMemoryData.(*inMemoryData)
+		inMemoryData := j.progress.InMemoryData.(*InMemoryData)
 		commitSeq := inMemoryData.CommitSeq
 		sourceStids := inMemoryData.SourceStids
 		isTxnInsert := inMemoryData.IsTxnInsert
@@ -1846,7 +1850,7 @@ func (j *Job) handleUpsert(binlog *festruct.TBinlog) error {
 		if j.Extra.ReuseBinlogLabel {
 			label = inMemoryData.Label
 		} else {
-			label = j.newLabel(commitSeq)
+			label = j.NewLabel(commitSeq)
 		}
 		log.Tracef("begin txn, label: %s, dest: %v, commitSeq: %d", label, dest, commitSeq)
 
@@ -1891,7 +1895,7 @@ func (j *Job) handleUpsert(binlog *festruct.TBinlog) error {
 		if err := updateInMemory(); err != nil {
 			return err
 		}
-		inMemoryData := j.progress.InMemoryData.(*inMemoryData)
+		inMemoryData := j.progress.InMemoryData.(*InMemoryData)
 		tableRecords := inMemoryData.TableRecords
 		txnId := inMemoryData.TxnId
 		isTxnInsert := inMemoryData.IsTxnInsert
@@ -1914,8 +1918,8 @@ func (j *Job) handleUpsert(binlog *festruct.TBinlog) error {
 			var allSubTxnInfos = make([]*festruct.TSubTxnInfo, 0, len(stidMap))
 			for _, destTableId := range inMemoryData.DestTableIds {
 				// When txn insert, use subTxnInfos to commit rather than commitInfos.
-				subTxnInfos, err := j.ingestBinlogForTxnInsert(commitSeq, txnId, tableRecords, stidMap, destTableId)
-				if err == errTriggerPartialSnapshot {
+				subTxnInfos, err := j.IngestBinlogForTxnInsert(commitSeq, txnId, tableRecords, stidMap, destTableId)
+				if err == ErrTriggerPartialSnapshot {
 					if j.Extra.PartialSnapshotParams == nil {
 						panic("partial snapshot params is nil when trigger partial snapshot")
 					}
@@ -1931,8 +1935,8 @@ func (j *Job) handleUpsert(binlog *festruct.TBinlog) error {
 			}
 			inMemoryData.SubTxnInfos = allSubTxnInfos
 		} else {
-			commitInfos, err := j.ingestBinlog(commitSeq, txnId, tableRecords)
-			if err == errTriggerPartialSnapshot {
+			commitInfos, err := j.IngestBinlog(commitSeq, txnId, tableRecords)
+			if err == ErrTriggerPartialSnapshot {
 				if j.Extra.PartialSnapshotParams == nil {
 					panic("partial snapshot params is nil when trigger partial snapshot")
 				}
@@ -1952,7 +1956,7 @@ func (j *Job) handleUpsert(binlog *festruct.TBinlog) error {
 		if err := updateInMemory(); err != nil {
 			return err
 		}
-		inMemoryData := j.progress.InMemoryData.(*inMemoryData)
+		inMemoryData := j.progress.InMemoryData.(*InMemoryData)
 		txnId := inMemoryData.TxnId
 		commitInfos := inMemoryData.CommitInfos
 
@@ -1968,7 +1972,7 @@ func (j *Job) handleUpsert(binlog *festruct.TBinlog) error {
 		if isTxnInsert {
 			resp, err = destRpc.CommitTransactionForTxnInsert(dest, txnId, true, subTxnInfos)
 		} else {
-			onlyCommitTxn := featureSkipWaitingTxnPublish
+			onlyCommitTxn := FeatureSkipWaitingTxnPublish
 			resp, err = destRpc.CommitTransaction(dest, txnId, commitInfos, onlyCommitTxn)
 		}
 		if err != nil {
@@ -1996,7 +2000,7 @@ func (j *Job) handleUpsert(binlog *festruct.TBinlog) error {
 			return err
 		}
 
-		inMemoryData := j.progress.InMemoryData.(*inMemoryData)
+		inMemoryData := j.progress.InMemoryData.(*InMemoryData)
 		txnId := inMemoryData.TxnId
 		destRpc, err := j.factory.NewFeRpc(dest)
 		if err != nil {
@@ -3264,7 +3268,7 @@ func (j *Job) isRenameRollupCommitted(record *record.RenameRollup) (bool, error)
 }
 
 func (j *Job) isRenamePartitionCommitted(record *record.RenamePartition) (bool, error) {
-	destTableId, err := j.getDestTableIdBySrc(record.TableId)
+	destTableId, err := j.GetDestTableIdBySrc(record.TableId)
 	if err != nil {
 		return false, err
 	}
@@ -3445,6 +3449,15 @@ func (j *Job) handleNonBarrierBinlog(binlog *festruct.TBinlog) error {
 	commitSeq := binlog.GetCommitSeq()
 
 	if binlogType == festruct.TBinlogType_UPSERT {
+		if IsJobHandleRegistered(binlogType) {
+			err := HandleBinlog(j, binlog)
+			if err != nil {
+				logger.Errorf("Handle upsert binlog failed, binlog type: %s, binlog data: %s, err: %v",
+					binlogType, binlog.GetData(), err)
+				return err
+			}
+			return nil
+		}
 		return j.handleUpsertWithRetry(binlog)
 	}
 
@@ -4358,12 +4371,20 @@ func (j *Job) GetJobProgress() *JobProgress {
 	return j.progress
 }
 
+func (j *Job) GetJobFactory() *Factory {
+	return j.factory
+}
+
 func (j *Job) GetSrcMeta() Metaer {
 	return j.srcMeta
 }
 
 func (j *Job) GetDestMeta() Metaer {
 	return j.destMeta
+}
+
+func (j *Job) GetInMemoryData() any {
+	return j.progress.InMemoryData
 }
 
 func (j *Job) raiseInterruptSignal() func() {

@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/bytedance/gopkg/util/logger"
 	"github.com/selectdb/ccr_syncer/pkg/xerror"
 )
 
@@ -81,14 +82,26 @@ func (u Upsert) String() string {
 //	}
 func NewUpsertFromJson(data string) (*Upsert, error) {
 	var up Upsert
-	err := json.Unmarshal([]byte(data), &up)
+	if err := up.Deserialize(data); err != nil {
+		return nil, err
+	}
+	return &up, nil
+}
+
+func (upsert *Upsert) Deserialize(data string) error {
+	err := json.Unmarshal([]byte(data), &upsert)
 	if err != nil {
-		return nil, xerror.Wrap(err, xerror.Normal, "unmarshal upsert error")
+		return xerror.Wrap(err, xerror.Normal, "unmarshal upsert error")
 	}
 
-	for tableId, tableRecord := range up.TableRecords {
+	for tableId, tableRecord := range upsert.TableRecords {
 		tableRecord.Id = tableId
 	}
 
-	return &up, nil
+	return nil
+}
+
+func (upsert *Upsert) GetTableId() int64 {
+	logger.Warnf("UPSERT binlog should not step into here ,upsert.TableRecords: %v", upsert.TableRecords)
+	return -1
 }

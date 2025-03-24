@@ -28,6 +28,10 @@ type Factory struct {
 	ThriftMetaFactory
 }
 
+func (f *Factory) CreateJob(context *IngestContext, j *Job, s string) (any, any) {
+	panic("unimplemented")
+}
+
 func NewFactory(rpcFactory rpc.IRpcFactory, metaFactory MetaerFactory, ISpecFactory base.SpecerFactory, thriftMetaFactory ThriftMetaFactory) *Factory {
 	return &Factory{
 		IRpcFactory:       rpcFactory,
